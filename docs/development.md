@@ -54,7 +54,7 @@ Skrypt publikuje dokładnie sprawdzone archiwum jako paczkę publiczną. Wersje 
 npm view @czlonkowski/n8n-nodes-librus version
 ```
 
-Dla kolejnego wydania zwiększ wersję, uzupełnij `CHANGELOG.md`, zapisz i wypchnij commit, a potem uruchom skrypt:
+Przy każdym pushu nowej wersji na GitHub podbij numer w `package.json` i `package-lock.json` oraz uzupełnij `CHANGELOG.md`. Zapisz i wypchnij commit, a potem uruchom skrypt:
 
 ```sh
 npm version patch --no-git-tag-version
@@ -62,8 +62,7 @@ npm version patch --no-git-tag-version
 npm run release
 ```
 
-
-Wersja `0.1.0` jest już opublikowana. Dla następnego wydania wybierz nowy numer wersji, zaktualizuj changelog i zapisz zmiany przed uruchomieniem `npm run release`. Zmiana README na GitHub nie aktualizuje opisu już opublikowanej wersji w npm; nowy README trafi do npm wraz z kolejnym wydaniem.
+Zmiana README na GitHub nie aktualizuje opisu już opublikowanej wersji w npm; nowy README trafi do npm wraz z kolejnym wydaniem.
 
 ## Testy na rzeczywistym koncie
 

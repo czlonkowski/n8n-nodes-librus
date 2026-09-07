@@ -1,6 +1,13 @@
 # Changelog
 
-## 0.1.0 — Unreleased
+## 0.1.1 — 2026-09-08
+
+- Fix credential connection tests failing with PROTOCOL_ERROR on empty HTTP redirects returned by n8n's legacy request helper.
+- Normalize missing response bodies without accepting malformed JSON or exposing request metadata.
+- Add regression coverage for the complete credential login flow and invalid inbox responses.
+- Simplify the Polish README around community node installation and usage; move development and release instructions to docs/development.md.
+
+## 0.1.0 — 2026-09-07
 
 - Scaffold an MIT-licensed, unofficial self-hosted n8n community node.
 - Add browser-session credentials and a credential connection test.

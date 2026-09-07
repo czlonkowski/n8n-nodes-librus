@@ -22,7 +22,7 @@ test('package entry points load and reference the existing credentials and icons
 		: Object.values(node.description.icon))
 		assert.ok(fs.existsSync(`dist/nodes/Librus/${icon.slice(5)}`));
 });
-test('both transport adapters disable automatic redirects and preserve raw response', async () => {
+test('both transport adapters disable automatic redirects and preserve response fields', async () => {
 	const request = {
 		url: 'https://api.librus.pl/OAuth/Authorization',
 		method: 'POST',
@@ -32,14 +32,14 @@ test('both transport adapters disable automatic redirects and preserve raw respo
 	};
 	const response = { statusCode: 302, headers: { location: '/next' }, body: '' };
 	let modern, legacy;
-	assert.equal(
+	assert.deepEqual(
 		await createTransport(async (options) => {
 			modern = options;
 			return response;
 		})(request),
 		response,
 	);
-	assert.equal(
+	assert.deepEqual(
 		await createCredentialTestTransport(async (options) => {
 			legacy = options;
 			return response;
@@ -150,3 +150,78 @@ test('Get Many passes the selected read filter to the client', async (t) => {
 		name === 'readStatus' ? 'unread' : parameters(name, index);
 	assert.deepEqual(await new Librus().execute.call(ctx), [[]]);
 });
+
+for (const [name, adapter] of Object.entries({
+	modern: createTransport,
+	legacy: createCredentialTestTransport,
+})) {
+	test(`${name} transport normalizes an absent body and excludes request metadata`, async () => {
+		const result = await adapter(async () => ({
+			statusCode: 302,
+			headers: { location: '/next', 'set-cookie': ['state=synthetic; Secure'] },
+			body: undefined,
+			request: { body: 'synthetic-password', headers: { Cookie: 'private-session' } },
+		}))({ url: 'https://api.librus.pl/OAuth/Authorization', method: 'GET' });
+		assert.deepEqual(result, {
+			statusCode: 302,
+			headers: { location: '/next', 'set-cookie': ['state=synthetic; Secure'] },
+			body: '',
+		});
+	});
+}
+
+function credentialReplies() {
+	const redirect = (location) => ({ statusCode: 302, headers: { location }, body: undefined });
+	const ok = (body, headers = {}) => ({ statusCode: 200, headers, body });
+	return [
+		redirect('https://api.librus.pl/OAuth/Authorization?client_id=46'),
+		ok('<form></form>', { 'set-cookie': 'api=synthetic-api; Path=/; Secure' }),
+		ok(JSON.stringify({ goTo: '/OAuth/Authorization/2FA' })),
+		redirect('https://synergia.librus.pl/rodzic/index'),
+		ok(undefined),
+		ok('{}'),
+		redirect('https://wiadomosci.librus.pl/nowy/inbox'),
+		ok(undefined, { 'set-cookie': 'inbox=synthetic-inbox; Path=/; Secure' }),
+		ok(JSON.stringify({ data: [] })),
+	];
+}
+async function runCredentialTest(replies) {
+	const calls = [];
+	const result = await new Librus().methods.credentialTest.librusConnectionTest.call(
+		{
+			helpers: {
+				request: async (options) => {
+					calls.push(options);
+					assert.ok(replies.length, 'Unexpected additional request');
+					return replies.shift();
+				},
+			},
+		},
+		{ data: { username: 'synthetic', password: 'synthetic-password' } },
+	);
+	return { result, calls };
+}
+test('credential test completes login with legacy empty redirects and empty landing pages', async () => {
+	const replies = credentialReplies();
+	const { result, calls } = await runCredentialTest(replies);
+	assert.equal(result.status, 'OK');
+	assert.equal(replies.length, 0);
+	assert.equal(calls.length, 9);
+	assert.equal(calls[2].headers.Cookie, 'api=synthetic-api');
+	assert.equal(calls[8].headers.Cookie, 'inbox=synthetic-inbox');
+	assert.doesNotMatch(JSON.stringify(result), /synthetic-password|synthetic-api|synthetic-inbox/);
+});
+for (const [name, body] of Object.entries({
+	missing: undefined,
+	object: { data: [] },
+	null: null,
+})) {
+	test(`credential test rejects ${name} body where inbox JSON text is required`, async () => {
+		const replies = credentialReplies();
+		replies.at(-1).body = body;
+		const { result } = await runCredentialTest(replies);
+		assert.equal(replies.length, 0);
+		assert.equal(result.status, 'Error');
+		assert.match(result.message, /PROTOCOL_ERROR/);
+	});
+}

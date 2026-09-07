@@ -72,6 +72,8 @@ project _may_ contain example nodes and/or credentials that need to be
 **removed or renamed** once you start making an actual node.
 
 ## Key guidelines
+- Before every GitHub push delivering a version, bump the package version in
+  both `package.json` and `package-lock.json` and update `CHANGELOG.md`.
 - Use the `n8n-node` CLI tool **whenever possible** for building, dev mode,
   linting, etc.
 - **Always** address any lint/typecheck errors/warnings, unless there is a
