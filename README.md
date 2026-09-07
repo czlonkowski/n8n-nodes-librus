@@ -1,152 +1,88 @@
-<img src="nodes/Librus/librus.png" alt="Logo integracji Librus: otwarta książka, koperta i kropka oznaczająca nową wiadomość" width="112" height="112">
+<img src="https://raw.githubusercontent.com/czlonkowski/n8n-nodes-librus/main/nodes/Librus/librus.png" alt="Logo integracji Librus" width="112" height="112">
 
-# @czlonkowski/n8n-nodes-librus
+# Librus dla n8n
 
-Nieoficjalna paczka węzłów społecznościowych n8n do odczytywania wiadomości z dziennika Librus Synergia. Otwarty kod źródłowy, licencja MIT.
+Pobieraj wiadomości z Librus Synergia i uruchamiaj automatyzacje po otrzymaniu nowych wiadomości. Paczka zawiera dwa węzły: **Librus** i **Librus Trigger**.
 
-**Projekt jest na etapie eksperymentalnym.** Na rzeczywistym koncie sprawdzono logowanie, pobranie danych jednej wiadomości oraz jej treści z modułu szczegółów. Do zweryfikowania pozostają: zachowanie statusu nieprzeczytanych wiadomości, kompletność treści w różnych typach wiadomości, pobieranie kolejnych stron skrzynki oraz działanie przy cyklicznym uruchamianiu.
+To nieoficjalna, eksperymentalna integracja do **samodzielnie hostowanego n8n**. Nie jest dostępna w n8n Cloud. Instancja n8n musi korzystać z Node.js 24 lub nowszego.
 
-## Dostępne funkcje
+## Instalacja
 
-Operacja **Librus → Message → Get Many** loguje się do Librusa, otwiera sesję modułu wiadomości i zwraca każdą wiadomość jako osobny element danych n8n.
+1. W n8n przejdź do **Settings → Community nodes → Install**.
+2. Wklej pełną nazwę paczki, razem ze znakiem `@`:
 
-Można pobrać określoną liczbę wiadomości albo całą skrzynkę, strona po stronie. **Read Status** pozwala wybrać wszystkie (**All**), tylko nieprzeczytane (**Unread**) lub przeczytane (**Read**). Filtr działa na dacie odczytania z listy: brak daty albo pusty tekst oznacza wiadomość nieprzeczytaną. **Limit dotyczy pasujących wiadomości**. Węzeł przegląda metadane kolejnych stron lokalnie, więc znalezienie starszych nieprzeczytanych może wymagać zwiększenia Maximum Pages. Pełną treść pobiera dopiero dla wiadomości wybranych przez filtr i limit. Wynik zawiera identyfikator wiadomości zapisany jako tekst, dane nadawcy, temat, daty w oryginalnym formacie, datę odczytania, informację o załącznikach i tagi. Opcja **Include Content** dołącza treść, a **Content Source** określa jej źródło:
+   ```text
+   @czlonkowski/n8n-nodes-librus
+   ```
 
-| Content Source | Zawartość pola `content` |
+3. Zatwierdź instalację. W edytorze workflow wyszukaj **Librus** lub **Librus Trigger**.
+
+Jeśli widzisz błąd `Failed to check package version existence`, sprawdź nazwę: `czlonkowski/n8n-nodes-librus` bez początkowego `@` jest niepoprawne. [Paczka w npm](https://www.npmjs.com/package/@czlonkowski/n8n-nodes-librus).
+
+## Połączenie z Librusem
+
+W wybranym węźle utwórz dane uwierzytelniające **Librus Session API** i wpisz login oraz hasło używane do logowania w Synergii. Login może różnić się od adresu e-mail konta LIBRUS.
+
+Zapisz dane i sprawdź połączenie. Jeśli pojawi się `ACTION_REQUIRED`, zaloguj się w [serwisie Librus](https://portal.librus.pl/rodzina/synergia/loguj), uzupełnij wymagane potwierdzenia i ponów próbę w n8n.
+
+Dane logowania są przechowywane jako credentials w n8n. Węzeł nie zwraca hasła ani ciasteczek sesji w wynikach.
+
+## Pobieranie wiadomości
+
+W węźle **Librus** wybierz **Message → Get Many**.
+
+| Ustawienie | Działanie |
 | --- | --- |
-| **Preview** — domyślnie | Skrót z listy wiadomości. Może urwać się w środku zdania. |
-| **Full Message** | Treść pobrana osobno ze szczegółów każdej wiadomości. |
+| **Read Status → All** | Wszystkie wiadomości. |
+| **Read Status → Unread** | Tylko nieprzeczytane. |
+| **Read Status → Read** | Tylko przeczytane. |
+| **Limit** | Maksymalna liczba wiadomości pasujących do filtra. |
+| **Return All** | Wszystkie pasujące wiadomości, w granicach limitu stron. |
+| **Include Content** | Dołączenie treści wiadomości. |
+| **Content Source → Preview** | Skrócony podgląd z listy; może urwać się w środku zdania. |
+| **Content Source → Full Message** | Pełna treść ze szczegółów wiadomości. |
 
-W obu trybach treść jest dekodowana z base64 do UTF-8, z zachowaniem HTML. Pole `contentSource` w wyniku ma wartość `preview` albo `full`. Przy wyłączonym **Include Content** oba pola są pomijane.
+Każda wiadomość jest osobnym elementem danych z polami m.in. `messageId`, `senderName`, `topic`, `sendDate`, `readDate` i `isAnyFileAttached`. Po włączeniu treści wynik zawiera także `content` oraz `contentSource` (`preview` lub `full`).
 
-**Aby otrzymać pełną treść, włącz Include Content i wybierz Content Source → Full Message.** Samo włączenie Include Content zachowuje dotychczasowe działanie — podgląd z listy. W próbie na rzeczywistym koncie podgląd miał 95 znaków, a odpowiedź ze szczegółów tej samej wiadomości zawierała 463 znaki i zaczynała się od całego podglądu.
+**Aby pobrać pełną treść, włącz Include Content i wybierz Full Message.** Pobranie szczegółów może oznaczyć wiadomość jako przeczytaną w Librusie. W jednym wykonaniu można pobrać pełną treść maksymalnie 50 wiadomości.
 
-Pobranie szczegółów **może oznaczyć wiadomość jako przeczytaną w Librusie**. Nie sprawdzono jeszcze tego efektu na nieprzeczytanej wiadomości; próbę wykonano na wiadomości już przeczytanej. Wybierz Full Message świadomie, szczególnie w przepływach uruchamianych automatycznie.
+Jeśli znasz ID wiadomości, wybierz **Message → Get Content** i podaj **Message ID**. Ta operacja zwraca `messageId`, `content` i `contentSource: "full"`.
 
-**Librus → Message → Get Content** pobiera pełną treść pojedynczej wiadomości po **Message ID** i zwraca `messageId`, `content` oraz `contentSource: "full"`. Można przekazać ID z triggera wyrażeniem `{{ $json.messageId }}`. Metadane pozostają dostępne w danych poprzedniego węzła. Także ta operacja może oznaczyć wiadomość jako przeczytaną.
+## Automatyzacja po nowej wiadomości
 
-Paczka nie udostępnia wysyłania, usuwania, pobierania załączników ani osobnych operacji **Mark as Read / Mark as Unread**. W zbadanym interfejsie nowego modułu wiadomości Librusa nie znaleziono operacji przywracania statusu nieprzeczytanej; dlatego nie deklarujemy jej obsługi. Nadal trzeba sprawdzić, czy samo pobranie listy przez Librusa zmienia status odczytania.
+1. Dodaj **Librus Trigger** i wybierz zapisane dane logowania.
+2. Wybierz **Event → New Message**.
+3. Ustaw **Poll Times**, np. **Every X → 5 → Minutes**. Węzeł sprawdza skrzynkę cyklicznie; powiadomienie pojawi się po kolejnym sprawdzeniu.
+4. Ręcznie przetestuj węzeł. Zwróci jedną obecną wiadomość jako próbkę; pusta skrzynka nie zwróci danych.
+5. Dodaj dalsze kroki i opublikuj/aktywuj workflow.
 
-Dla każdego elementu wejściowego powstaje nowa sesja oparta na ciasteczkach. Nie ma jeszcze trwałego przechowywania sesji ani obsługi tokena odświeżającego. Jeśli podczas pobierania wiadomości zostanie rozpoznane wygaśnięcie sesji, węzeł może zalogować się ponownie jeden raz. Błędne dane logowania, brak dostępu, ograniczenie liczby żądań i błędy serwera nie uruchamiają pętli logowania.
+**Pierwsze automatyczne sprawdzenie zapamiętuje obecną skrzynkę bez uruchamiania workflow dla starych wiadomości.** Kolejne sprawdzenia wykrywają nowe ID, również gdy wiadomość została już przeczytana w aplikacji Librusa. Zmiana statusu starej wiadomości nie uruchamia triggera ponownie. Ręczne testy nie zmieniają tej historii.
 
-## Uruchomienie lokalne
+Trigger domyślnie zwraca metadane i skrócony podgląd. Aby dołączyć pełną treść, dodaj po nim **Librus → Get Content** i ustaw **Message ID** na:
 
-Wymagane są **Node.js 24 LTS** i npm. Testowano na Node.js 24.20.0.
-
-```sh
-git clone https://github.com/czlonkowski/n8n-nodes-librus.git
-cd n8n-nodes-librus
-npm ci
-npm run check
-N8N_LISTEN_ADDRESS=127.0.0.1 N8N_PORT=5689 npm run dev
+```text
+{{ $json.messageId }}
 ```
 
-Edytor n8n będzie dostępny pod adresem **http://localhost:5689**.
+Przykładowy workflow: **Librus Trigger → Librus (Get Content) → wybrany kanał powiadomień**. Jeśli wystarczy temat i podgląd, pomiń Get Content.
 
-Przed uruchomieniem sprawdź `node --version`: potrzebna jest wersja 24 lub nowsza. Plik `.nvmrc` nie przełącza wersji Node.js automatycznie. Jeśli używasz nvm, wykonaj najpierw `nvm use`.
+## Ograniczenia i rozwiązywanie problemów
 
-Projekt korzysta z oficjalnego narzędzia `@n8n/node-cli` do budowania paczki, sprawdzania kodu i uruchamiania środowiska deweloperskiego. Skrypt `dev` przechowuje osobny profil n8n w katalogu **`../.n8n-librus-dev`**, poza repozytorium. Nie przenoś profilu do środka projektu: narzędzie tworzy w nim dowiązanie do repozytorium, co prowadziłoby do zapętlenia skanowania katalogów i błędu `ENAMETOOLONG`.
+- **Mark as Unread / Mark as Read**, wysyłanie, usuwanie i pobieranie załączników nie są obsługiwane. Odczyt pełnej treści może sam zmienić status wiadomości w Librusie.
+- **`SCAN_INCOMPLETE`**: zwiększ **Maximum Pages** (domyślnie 20, maksymalnie 50). Przy Get Many możesz też ograniczyć liczbę wyników. Trigger musi sprawdzić całą skrzynkę; niepełny skan nie aktualizuje jego historii.
+- **`FULL_CONTENT_LIMIT`**: wyłącz Return All i ustaw Limit na 50 lub mniej.
+- **Błąd dalszego kroku workflow**: ponów nieudane wykonanie w n8n. Kolejne sprawdzenie triggera nie wyemituje tej samej wiadomości ponownie. Przy równoległych wykonaniach lub wielu instancjach możliwe są duplikaty.
+- Historia triggera obejmuje do **10 000 ID**. Po osiągnięciu limitu utwórz nowy trigger, który zapamięta aktualną skrzynkę jako stan początkowy. Zmiana konta lub utrata zapisanej historii również ustala nowy stan początkowy.
+- Wiadomość usunięta lub przeniesiona poza skrzynkę pomiędzy sprawdzeniami może nie zostać wykryta.
 
-Nie dodawaj do repozytorium profilu n8n ani danych konta. Testy automatyczne korzystają wyłącznie z fikcyjnych odpowiedzi HTTP — nie łączą się z Librusem i nie wymagają prawdziwych danych logowania.
+Integracja korzysta z nieoficjalnych tras Librusa. Długotrwałe działanie harmonogramu i wpływ pobierania listy na status odczytania wymagają jeszcze weryfikacji. Treść wiadomości trafia do danych wykonania workflow — jej przechowywaniem zarządzają ustawienia historii n8n.
 
-Szczegóły techniczne opisano w dokumentach: [architektura](docs/architecture.md), [testy na rzeczywistym koncie](docs/live-verification.md), [wyniki weryfikacji](docs/verification.md) i [bezpieczeństwo](SECURITY.md). Te dokumenty techniczne są obecnie po angielsku.
+## Pomoc
 
-## Instalacja we własnej instancji n8n
+Błędy i propozycje zgłaszaj w [GitHub Issues](https://github.com/czlonkowski/n8n-nodes-librus/issues). Nie umieszczaj w zgłoszeniach loginów, haseł, ciasteczek ani treści prawdziwych wiadomości.
 
-**Paczka nie została jeszcze opublikowana w npm.** Aby przygotować archiwum do instalacji, wykonaj w katalogu projektu:
+Instrukcje pracy nad kodem: [dokumentacja deweloperska](docs/development.md).
 
-```sh
-npm ci
-npm run check
-npm pack
-```
+## Licencja
 
-Zainstaluj powstały plik `.tgz` w katalogu węzłów społecznościowych swojej **testowej instancji n8n**, a następnie uruchom ją ponownie. Przy standardowym profilu jest to katalog `~/.n8n/nodes`. Jeśli korzystasz z kontenera, skopiuj archiwum do kontenera i zadbaj o trwały wolumen z danymi użytkownika n8n. Pomocna jest [instrukcja ręcznej instalacji n8n](https://docs.n8n.io/integrations/community-nodes/installation-and-management/manual-installation/).
-
-Do czasu publikacji paczki nie używaj polecenia `npm install @czlonkowski/n8n-nodes-librus`.
-
-Projekt jest przeznaczony do **samodzielnie hostowanego n8n jako niezweryfikowany węzeł społecznościowy**. Biblioteka `tough-cookie` zapewnia obsługę ciasteczek z uwzględnieniem ich domen i ścieżek. Ta zależność wyklucza obecną wersję z weryfikacji n8n Cloud według wymogu braku zależności uruchomieniowych, dlatego `n8n.strict` ma wartość `false`.
-
-Zgodnie z konwencją paczek n8n pole `peerDependencies` zawiera `n8n-workflow: "*"`. Nie oznacza to zgodności ze wszystkimi wersjami n8n. Typy używane podczas budowania pochodzą z `n8n-workflow` 2.38.1; próbę na rzeczywistym koncie przeprowadzono w n8n 2.37.10.
-
-## Konfiguracja i pierwszy test
-
-1. W interfejsie n8n utwórz dane uwierzytelniające typu **Librus Session API**. Podaj login i hasło akceptowane przez formularz Synergii — login może różnić się od adresu e-mail konta LIBRUS. n8n szyfruje te dane swoim kluczem instancji.
-2. W dzienniku zanotuj, które z ostatnich wiadomości są nieprzeczytane, bez otwierania ich. Zrób to przed testem połączenia: test danych logowania również pobiera jeden wpis z listy wiadomości, choć nie zwraca jego zawartości.
-3. Utwórz przepływ **Manual Trigger → Librus**. Wybierz **Message → Get Many**, wyłącz **Return All**, ustaw **Limit: 10** i pozostaw **Include Content** wyłączone.
-4. Uruchom węzeł i porównaj wyniki z dziennikiem. Odśwież listę w Librusie i sprawdź, czy status nieprzeczytanych wiadomości się nie zmienił.
-5. Włącz **Include Content**, wybierz **Content Source → Full Message** i porównaj treść wiadomości wcześniej przeczytanej w dzienniku. Sprawdź także polskie znaki i formatowanie. Na pierwszą próbę ustaw **Limit: 1**.
-
-Parametr **Maximum Pages** domyślnie wynosi 20, a jego maksymalna wartość to 50. Jedno żądanie pobiera do 50 wpisów. Po osiągnięciu limitu stron, żądań lub czasu węzeł zgłasza błąd zamiast zwracać niepełny wynik. Daty pozostają w formacie źródłowym, ponieważ interpretacja strefy czasowej nie została jeszcze zweryfikowana.
-
-Tryb **Full Message** obsługuje do **50 wiadomości na wykonanie**. Szczegóły są pobierane kolejno, w tej samej sesji, dopiero po zakończeniu pobierania listy, zastosowaniu limitu i usunięciu duplikatów identyfikatorów. Jeśli wynik zawiera więcej niż 50 wiadomości, węzeł zgłosi `FULL_CONTENT_LIMIT` przed pobraniem szczegółów. Wyłącz wtedy Return All i ustaw Limit na 50 lub mniej.
-
-Błąd pobrania szczegółów zatrzymuje wykonanie — węzeł nie zastępuje brakującej pełnej treści skrótem. Nie zwraca też częściowego wyniku, choć wcześniejsze żądania szczegółów mogły już wpłynąć na status odczytania w Librusie. Pole `readDate` pochodzi z listy pobranej przed odczytem szczegółów. Przy filtrze Unread i odnowieniu wygasłej sesji zachowywany jest już wybrany zestaw identyfikatorów, aby wcześniejszy odczyt szczegółów nie usunął ich z bieżącego wyniku.
-
-Po włączeniu **Include Content** treść wiadomości trafia do zwykłych danych wykonania n8n. Jej przechowywanie zależy od ustawień zapisywania i usuwania historii wykonań. Podgląd dołączany przez trigger i treść z Get Content również trafiają do danych wykonania. Jeśli wyświetlasz zwrócony HTML w innej aplikacji, potraktuj go jako niezaufaną treść.
-
-## Librus Trigger — nowa wiadomość
-
-Osobny węzeł **Librus Trigger** cyklicznie sprawdza skrzynkę i uruchamia przepływ dla nowych identyfikatorów `messageId`. Jest to odpytywanie Librusa według harmonogramu; opóźnienie zależy od **Poll Times**.
-
-1. Dodaj **Librus Trigger**, wybierz zapisane dane **Librus Session API** i zdarzenie **New Message**.
-2. Ustaw **Poll Times** na **Every X → 5 → Minutes** lub rzadziej. n8n domyślnie ustawia minutę, więc zmień ten parametr. Bezpieczna częstotliwość dla Librusa nadal wymaga sprawdzenia.
-3. Użyj ręcznego testu triggera: zwróci jedną bieżącą wiadomość jako próbkę, niezależnie od jej wieku i statusu. Pusta skrzynka nie zwróci próbki. Test nie zmienia historii wykrytych wiadomości.
-4. Połącz kolejne kroki i zapisz przepływ. Przykład: **Librus Trigger → Librus (Get Content, Message ID: `{{ $json.messageId }}`) → wybrany kanał powiadomień**. Do powiadomienia z samym tematem i podglądem wystarczy bezpośrednie wyjście triggera.
-5. Po opublikowaniu/aktywacji przepływu pierwsze automatyczne sprawdzenie zapamięta całą obecną skrzynkę i nie uruchomi dalszych kroków. Dopiero kolejne sprawdzenia zwrócą nowe wiadomości. Zwykłe zapisanie nieaktywnego workflow nie uruchamia harmonogramu.
-
-Trigger sprawdza zarówno przeczytane, jak i nieprzeczytane wiadomości. Wiadomość odczytana w aplikacji przed kolejnym sprawdzeniem nadal zostanie wykryta. Zmiana statusu starej wiadomości nie jest nowym zdarzeniem. **Include Preview** domyślnie dołącza skróconą treść; trigger nie pobiera szczegółów wiadomości. Możesz wyłączyć podgląd i otrzymywać same metadane.
-
-Stan triggera jest przechowywany przez n8n osobno dla węzła: wersja formatu, skrót identyfikujący konto i identyfikatory wykrytych wiadomości. Nie zawiera hasła, ciasteczek ani treści. Przy zachowaniu tego stanu restart nie odtwarza historii. Zmiana konta lub utworzenie nowego triggera ustala nowy stan początkowy. Utrata bazy n8n oznacza utratę tej historii.
-
-Każde automatyczne sprawdzenie musi ukończyć przegląd całej skrzynki w granicach **Maximum Pages** (domyślnie 20, maksymalnie 50), 100 żądań i 120 sekund. Niepełny skan kończy się błędem i nie zmienia historii. Historia mieści do **10 000 identyfikatorów**; po przekroczeniu limitu pojawi się błąd. Utworzenie nowego triggera rozpocznie historię od aktualnej skrzynki bez odtwarzania starych zdarzeń. Wiadomość usunięta lub przeniesiona poza skrzynkę pomiędzy sprawdzeniami może pozostać niewykryta.
-
-**Błąd dalszego kroku nie cofa historii triggera.** Jeżeli np. wysyłka powiadomienia się nie powiedzie, ponów nieudane wykonanie w n8n. Samo następne sprawdzenie nie wyśle tej wiadomości ponownie. Przy równoległych wykonaniach lub wielu instancjach możliwe są duplikaty. Gdy potrzebujesz gwarancji dostarczenia i deduplikacji także przy awariach, zapisuj zdarzenia w trwałej kolejce z kluczem konto + `messageId` i osobno potwierdzaj udaną wysyłkę.
-
-Testy automatyczne obejmują stan początkowy, restart, zmianę statusu, błędy skanowania i równoległe sprawdzenia. Działanie harmonogramu na rzeczywistym koncie, skutki ponownego logowania i zachowanie statusu odczytania wymagają jeszcze próby. Paczka nie aktywuje workflow automatycznie.
-
-## Zgłaszanie błędów i rozwój
-
-Błędy i propozycje zmian zgłaszaj w [GitHub Issues](https://github.com/czlonkowski/n8n-nodes-librus/issues). Przed przesłaniem zmian uruchom `npm run check` oraz `npm pack --dry-run`. Do testów dodawaj wyłącznie fikcyjne dane. Opisz sposób odtworzenia problemu, usuwając dane osobowe; nie publikuj loginów, haseł, ciasteczek ani treści prawdziwych wiadomości.
-
-## Ręczna publikacja w npm
-
-Paczka używa nazwy **`@czlonkowski/n8n-nodes-librus`**. Niescopowana nazwa `n8n-nodes-librus` była wcześniej używana przez innego autora. Repozytorium GitHub zachowuje dotychczasową nazwę.
-
-Przy Node.js 24 lub nowszym najpierw wykonaj próbę bez publikacji:
-
-```sh
-npm run release -- --dry-run
-```
-
-Skrypt instaluje zależności zgodnie z lockfile, uruchamia lint, kompilację i testy, przygotowuje archiwum oraz sprawdza jego zawartość. Tryb próbny nie wymaga zalogowania do npm. Oba tryby wymagają połączenia z rejestrem npm.
-
-Pierwsza publikacja przygotowanej wersji:
-
-```sh
-npm login --registry=https://registry.npmjs.org
-npm whoami
-npm run release
-```
-
-Użyj konta **czlonkowski**. Przed właściwą publikacją wszystkie zmiany muszą być zapisane w commicie. npm może poprosić o potwierdzenie logowania/publikacji w przeglądarce lub kod 2FA — wykonaj ten krok bezpośrednio w npm. Nie zapisuj kodów ani tokenów w repozytorium.
-
-Skrypt publikuje dokładnie sprawdzone archiwum jako paczkę publiczną. Wersje stabilne otrzymują tag `latest`, a wersje z sufiksem (np. `0.2.0-beta.1`) — `next`. Nie tworzy tagów Git ani GitHub Release i nie korzysta z GitHub Actions do publikacji. Jeżeli npm zgłosi błąd po wysłaniu paczki, sprawdź rejestr przed ponowieniem; opublikowanej wersji nie można nadpisać:
-
-```sh
-npm view @czlonkowski/n8n-nodes-librus version
-```
-
-Dla kolejnego wydania zwiększ wersję, uzupełnij `CHANGELOG.md`, zapisz i wypchnij commit, a potem uruchom skrypt:
-
-```sh
-npm version patch --no-git-tag-version
-# Uzupełnij CHANGELOG.md, następnie zapisz zmiany w Git.
-npm run release
-```
-
-Po publikacji w samodzielnie hostowanym n8n wejdź w **Settings → Community nodes → Install** i podaj **`@czlonkowski/n8n-nodes-librus`**. Paczka pozostaje niezweryfikowanym węzłem społecznościowym; publikacja w npm nie oznacza dostępności w n8n Cloud.
-
-## Licencja i autorstwo
-
-Kod udostępniono na [licencji MIT](LICENSE). Projekt nie jest powiązany z firmą LIBRUS ani przez nią zatwierdzony. Informacje o źródłach wykorzystanych do poznania sposobu działania integracji znajdują się w [NOTICE.md](NOTICE.md).
+[MIT](LICENSE). Projekt nie jest powiązany z firmą LIBRUS ani przez nią zatwierdzony. [Informacje o autorstwie i źródłach](NOTICE.md).
