@@ -1,0 +1,61 @@
+{
+  "name": "n8n-nodes-librus",
+  "version": "0.1.0",
+  "description": "Read Librus Synergia messages in n8n using a browser-style session. Unofficial community integration.",
+  "license": "MIT",
+  "keywords": [
+    "n8n-community-node-package",
+    "librus",
+    "synergia"
+  ],
+  "author": {
+    "name": "Romuald Członkowski"
+  },
+  "scripts": {
+    "build": "n8n-node build",
+    "dev": "n8n-node dev",
+    "lint": "n8n-node lint",
+    "lint:fix": "n8n-node lint --fix",
+    "format": "prettier --write credentials nodes tests .github package.json tsconfig.json eslint.config.mjs",
+    "test": "npm run build && node --test tests/*.test.cjs",
+    "check": "npm run lint && npm test",
+    "prepublishOnly": "npm run check",
+    "prepack": "npm run build"
+  },
+  "files": [
+    "dist/nodes",
+    "dist/credentials",
+    "LICENSE",
+    "NOTICE.md",
+    "SECURITY.md",
+    "CHANGELOG.md",
+    "docs"
+  ],
+  "n8n": {
+    "n8nNodesApiVersion": 1,
+    "strict": false,
+    "credentials": [
+      "dist/credentials/LibrusSessionApi.credentials.js"
+    ],
+    "nodes": [
+      "dist/nodes/Librus/Librus.node.js"
+    ]
+  },
+  "devDependencies": {
+    "@n8n/node-cli": "0.46.4",
+    "@types/node": "24.3.0",
+    "eslint": "9.32.0",
+    "n8n-workflow": "2.38.1",
+    "prettier": "3.6.2",
+    "typescript": "5.9.2"
+  },
+  "peerDependencies": {
+    "n8n-workflow": "*"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "dependencies": {
+    "tough-cookie": "6.0.2"
+  }
+}

@@ -1,0 +1,11 @@
+node_modules/
+dist/
+*.tsbuildinfo
+*.tgz
+.env
+.env.*
+!.env.example
+.n8n/
+.n8n-dev/
+coverage/
+.DS_Store
