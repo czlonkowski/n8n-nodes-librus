@@ -1,7 +1,7 @@
 {
   "name": "n8n-nodes-librus",
   "version": "0.1.0",
-  "description": "Read Librus Synergia messages in n8n using a browser-style session. Unofficial community integration.",
+  "description": "Nieoficjalny węzeł społecznościowy n8n do odczytywania wiadomości z Librus Synergia.",
   "license": "MIT",
   "keywords": [
     "n8n-community-node-package",
@@ -9,7 +9,8 @@
     "synergia"
   ],
   "author": {
-    "name": "Romuald Członkowski"
+    "name": "Romuald Członkowski",
+    "email": "56956555+czlonkowski@users.noreply.github.com"
   },
   "scripts": {
     "build": "n8n-node build",
@@ -57,5 +58,13 @@
   },
   "dependencies": {
     "tough-cookie": "6.0.2"
+  },
+  "homepage": "https://github.com/czlonkowski/n8n-nodes-librus#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/czlonkowski/n8n-nodes-librus.git"
+  },
+  "bugs": {
+    "url": "https://github.com/czlonkowski/n8n-nodes-librus/issues"
   }
 }

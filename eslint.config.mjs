@@ -36,9 +36,6 @@ export default [
 		rules: {
 			// This unverified self-hosted package deliberately uses a real cookie jar.
 			'@n8n/community-nodes/no-runtime-dependencies': 'off',
-			// Do not invent a public homepage or publish the author's email.
-			'@n8n/community-nodes/require-homepage': 'off',
-			'@n8n/community-nodes/valid-author': 'off',
 		},
 	},
 ];
