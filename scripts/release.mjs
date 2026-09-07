@@ -83,6 +83,12 @@ try {
 		/^(dist\/(nodes|credentials)\/|docs\/|package\.json$|README\.md$|LICENSE$|NOTICE\.md$|SECURITY\.md$|CHANGELOG\.md$)/;
 	if ([...files].some((file) => !allowed.test(file)))
 		throw new Error('Archiwum zawiera pliki spoza listy publikowanych katalogów.');
+	const sensitivePath =
+		/(^|\/)(?:\.env(?:\.[^/]*)?|\.npmrc|\.n8n[^/]*|id_rsa|id_ed25519)(?:\/|$)|\.(?:pem|key|p12|pfx|db|sqlite|sqlite3)(?:-(?:wal|shm))?$/i;
+	if ([...files].some((file) => sensitivePath.test(file)))
+		throw new Error(
+			'Archiwum zawiera plik mogący przechowywać dane uwierzytelniające. Publikacja zatrzymana.',
+		);
 	console.log(`Archiwum: ${pack.filename}; plików: ${files.size}; integralność: ${pack.integrity}`);
 	const tag = pkg.version.includes('-') ? 'next' : 'latest';
 	const archive = join(packDirectory, pack.filename);

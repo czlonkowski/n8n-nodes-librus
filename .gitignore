@@ -9,3 +9,6 @@ dist/
 .n8n-dev/
 coverage/
 .DS_Store
+
+# Local publishing credentials must never enter Git.
+.npmrc
