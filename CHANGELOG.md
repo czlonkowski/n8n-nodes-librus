@@ -19,3 +19,5 @@
 - Add Librus Trigger with silent initial baseline, manual sample, account-scoped bounded ID history and preview-only polling.
 - Preserve unread selections during full-body session recovery to avoid dropping messages whose detail reads changed their status.
 - Document polling, cursor persistence, downstream retry semantics and unsupported mark-unread operations in Polish.
+- Use the public npm scope @czlonkowski/n8n-nodes-librus to avoid the previous unrelated unscoped package.
+- Add a manual release script with a dry run, checks, archive inspection and authenticated public publishing.

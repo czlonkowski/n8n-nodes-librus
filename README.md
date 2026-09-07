@@ -1,6 +1,6 @@
 <img src="nodes/Librus/librus.png" alt="Logo integracji Librus: otwarta książka, koperta i kropka oznaczająca nową wiadomość" width="112" height="112">
 
-# n8n-nodes-librus
+# @czlonkowski/n8n-nodes-librus
 
 Nieoficjalna paczka węzłów społecznościowych n8n do odczytywania wiadomości z dziennika Librus Synergia. Otwarty kod źródłowy, licencja MIT.
 
@@ -63,7 +63,7 @@ npm pack
 
 Zainstaluj powstały plik `.tgz` w katalogu węzłów społecznościowych swojej **testowej instancji n8n**, a następnie uruchom ją ponownie. Przy standardowym profilu jest to katalog `~/.n8n/nodes`. Jeśli korzystasz z kontenera, skopiuj archiwum do kontenera i zadbaj o trwały wolumen z danymi użytkownika n8n. Pomocna jest [instrukcja ręcznej instalacji n8n](https://docs.n8n.io/integrations/community-nodes/installation-and-management/manual-installation/).
 
-Do czasu publikacji paczki nie używaj polecenia `npm install n8n-nodes-librus`.
+Do czasu publikacji paczki nie używaj polecenia `npm install @czlonkowski/n8n-nodes-librus`.
 
 Projekt jest przeznaczony do **samodzielnie hostowanego n8n jako niezweryfikowany węzeł społecznościowy**. Biblioteka `tough-cookie` zapewnia obsługę ciasteczek z uwzględnieniem ich domen i ścieżek. Ta zależność wyklucza obecną wersję z weryfikacji n8n Cloud według wymogu braku zależności uruchomieniowych, dlatego `n8n.strict` ma wartość `false`.
 
@@ -109,7 +109,43 @@ Testy automatyczne obejmują stan początkowy, restart, zmianę statusu, błędy
 
 Błędy i propozycje zmian zgłaszaj w [GitHub Issues](https://github.com/czlonkowski/n8n-nodes-librus/issues). Przed przesłaniem zmian uruchom `npm run check` oraz `npm pack --dry-run`. Do testów dodawaj wyłącznie fikcyjne dane. Opisz sposób odtworzenia problemu, usuwając dane osobowe; nie publikuj loginów, haseł, ciasteczek ani treści prawdziwych wiadomości.
 
-Przy wydawaniu nowej wersji zaktualizuj `CHANGELOG.md`. Repozytorium nie ma automatycznego procesu publikowania paczki w npm.
+## Ręczna publikacja w npm
+
+Paczka używa nazwy **`@czlonkowski/n8n-nodes-librus`**. Niescopowana nazwa `n8n-nodes-librus` była wcześniej używana przez innego autora. Repozytorium GitHub zachowuje dotychczasową nazwę.
+
+Przy Node.js 24 lub nowszym najpierw wykonaj próbę bez publikacji:
+
+```sh
+npm run release -- --dry-run
+```
+
+Skrypt instaluje zależności zgodnie z lockfile, uruchamia lint, kompilację i testy, przygotowuje archiwum oraz sprawdza jego zawartość. Tryb próbny nie wymaga zalogowania do npm. Oba tryby wymagają połączenia z rejestrem npm.
+
+Pierwsza publikacja przygotowanej wersji:
+
+```sh
+npm login --registry=https://registry.npmjs.org
+npm whoami
+npm run release
+```
+
+Użyj konta **czlonkowski**. Przed właściwą publikacją wszystkie zmiany muszą być zapisane w commicie. npm może poprosić o potwierdzenie logowania/publikacji w przeglądarce lub kod 2FA — wykonaj ten krok bezpośrednio w npm. Nie zapisuj kodów ani tokenów w repozytorium.
+
+Skrypt publikuje dokładnie sprawdzone archiwum jako paczkę publiczną. Wersje stabilne otrzymują tag `latest`, a wersje z sufiksem (np. `0.2.0-beta.1`) — `next`. Nie tworzy tagów Git ani GitHub Release i nie korzysta z GitHub Actions do publikacji. Jeżeli npm zgłosi błąd po wysłaniu paczki, sprawdź rejestr przed ponowieniem; opublikowanej wersji nie można nadpisać:
+
+```sh
+npm view @czlonkowski/n8n-nodes-librus version
+```
+
+Dla kolejnego wydania zwiększ wersję, uzupełnij `CHANGELOG.md`, zapisz i wypchnij commit, a potem uruchom skrypt:
+
+```sh
+npm version patch --no-git-tag-version
+# Uzupełnij CHANGELOG.md, następnie zapisz zmiany w Git.
+npm run release
+```
+
+Po publikacji w samodzielnie hostowanym n8n wejdź w **Settings → Community nodes → Install** i podaj **`@czlonkowski/n8n-nodes-librus`**. Paczka pozostaje niezweryfikowanym węzłem społecznościowym; publikacja w npm nie oznacza dostępności w n8n Cloud.
 
 ## Licencja i autorstwo
 

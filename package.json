@@ -1,5 +1,5 @@
 {
-  "name": "n8n-nodes-librus",
+  "name": "@czlonkowski/n8n-nodes-librus",
   "version": "0.1.0",
   "description": "Nieoficjalny węzeł społecznościowy n8n do odczytywania wiadomości z Librus Synergia.",
   "license": "MIT",
@@ -21,7 +21,8 @@
     "test": "npm run build && node --test tests/*.test.cjs",
     "check": "npm run lint && npm test",
     "prepublishOnly": "npm run check",
-    "prepack": "npm run build"
+    "prepack": "npm run build",
+    "release": "node scripts/release.mjs"
   },
   "files": [
     "dist/nodes",
@@ -67,5 +68,9 @@
   },
   "bugs": {
     "url": "https://github.com/czlonkowski/n8n-nodes-librus/issues"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
   }
 }
