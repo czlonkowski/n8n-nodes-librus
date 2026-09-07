@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.2 — 2026-09-08
+
+- Diagnose protocol failures with fixed validation labels, primitive type names and inbox page/item positions, without response values, message IDs or credentials.
+- Distinguish authentication failures from inbox scan failures while preserving strict validation and trigger history on failed scans.
+
 ## 0.1.1 — 2026-09-08
 
 - Fix credential connection tests failing with PROTOCOL_ERROR on empty HTTP redirects returned by n8n's legacy request helper.

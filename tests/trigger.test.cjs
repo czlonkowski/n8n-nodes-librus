@@ -180,3 +180,57 @@ test('independent stale state copies can emit duplicates: no distributed exactly
 	assert.equal(selectNewMessages(state, account, [message('new')]).length, 1);
 	assert.equal(selectNewMessages(copy, account, [message('new')]).length, 1);
 });
+
+test('activation preserves history and surfaces safe diagnostics for invalid later-page metadata', async () => {
+	const raw = (id) => ({
+		messageId: String(id),
+		senderFirstName: 'Synthetic',
+		senderLastName: 'Sender',
+		senderName: 'Synthetic Sender',
+		topic: 'PRIVATE-TOPIC',
+		sendDate: '2026-09-08',
+		readDate: null,
+		category: null,
+		isAnyFileAttached: false,
+		tags: [],
+	});
+	const ok = (body = '') => ({
+		statusCode: 200,
+		headers: {},
+		body: typeof body === 'string' ? body : JSON.stringify(body),
+	});
+	const redirect = (location) => ({ statusCode: 302, headers: { location }, body: '' });
+	const replies = [
+		redirect('https://api.librus.pl/OAuth/Authorization?client_id=46'),
+		ok('<form></form>'),
+		ok({ goTo: '/OAuth/Authorization/2FA' }),
+		redirect('https://synergia.librus.pl/rodzic/index'),
+		ok(),
+		ok('{}'),
+		redirect('https://wiadomosci.librus.pl/nowy/inbox'),
+		ok(),
+		ok({ data: Array.from({ length: 50 }, (_, i) => raw(i)) }),
+		ok({ data: [{ ...raw('PRIVATE-ID'), senderFirstName: null }] }),
+	];
+	const state = {};
+	selectNewMessages(state, account, [message('existing')]);
+	const before = JSON.stringify(state);
+	const ctx = context(state);
+	const parameters = ctx.getNodeParameter;
+	ctx.getNodeParameter = (name) => (name === 'includePreview' ? false : parameters(name));
+	ctx.helpers.httpRequest = async () => {
+		assert.ok(replies.length, 'Unexpected request');
+		return replies.shift();
+	};
+	await assert.rejects(new LibrusTrigger().poll.call(ctx), (error) => {
+		assert.match(error.message, /Check: message.senderFirstName; received type: null/);
+		assert.match(error.message, /Inbox page: 2; page size: 50; item: 1/);
+		assert.doesNotMatch(
+			error.message + error.stack + JSON.stringify(error),
+			/PRIVATE-ID|PRIVATE-TOPIC|secret-password|synthetic-login/,
+		);
+		return true;
+	});
+	assert.equal(replies.length, 0);
+	assert.equal(JSON.stringify(state), before);
+});

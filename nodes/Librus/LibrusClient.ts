@@ -96,6 +96,30 @@ export class LibrusError extends Error {
 export function safeError(error: unknown): LibrusError {
 	return error instanceof LibrusError ? error : new LibrusError('PROTOCOL_ERROR');
 }
+// Diagnostics contain only code-owned labels and primitive type names, never values.
+type ProtocolCheck =
+	| `message.${keyof Message}`
+	| 'message object'
+	| 'JSON response'
+	| 'HTML instead of JSON'
+	| 'base64 content'
+	| 'UTF-8 content'
+	| 'HTTP body type'
+	| 'HTTP body size'
+	| 'response cookie'
+	| 'POST redirect'
+	| 'redirect location'
+	| 'redirect limit'
+	| 'inbox destination'
+	| 'inbox response object'
+	| 'inbox data array'
+	| 'inbox page size';
+function protocolError(check: ProtocolCheck, value?: unknown): LibrusError {
+	const type = value === null ? 'null' : Array.isArray(value) ? 'array' : typeof value;
+	const error = new LibrusError('PROTOCOL_ERROR');
+	error.message += ` [Check: ${check}; received type: ${type}]`;
+	return error;
+}
 const allowedHosts = new Set([
 	'portal.librus.pl',
 	'synergia.librus.pl',
@@ -171,7 +195,7 @@ function parseJson(body: string): unknown {
 	try {
 		return JSON.parse(body);
 	} catch {
-		throw new LibrusError('PROTOCOL_ERROR');
+		throw protocolError(isHtml(body) ? 'HTML instead of JSON' : 'JSON response', body);
 	}
 }
 function isHtml(body: string): boolean {
@@ -191,16 +215,16 @@ function decodeContent(value: unknown): string {
 		typeof value !== 'string' ||
 		!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value)
 	) {
-		throw new LibrusError('PROTOCOL_ERROR');
+		throw protocolError('base64 content', value);
 	}
 	try {
 		return new TextDecoder('utf-8', { fatal: true }).decode(Buffer.from(value, 'base64'));
 	} catch {
-		throw new LibrusError('PROTOCOL_ERROR');
+		throw protocolError('UTF-8 content', value);
 	}
 }
 function parseMessage(value: unknown, includeContent: boolean): Message {
-	if (!object(value)) throw new LibrusError('PROTOCOL_ERROR');
+	if (!object(value)) throw protocolError('message object', value);
 	const strings = [
 		'messageId',
 		'senderFirstName',
@@ -209,27 +233,23 @@ function parseMessage(value: unknown, includeContent: boolean): Message {
 		'topic',
 		'sendDate',
 	] as const;
-	if (
-		strings.some((key) => typeof value[key] !== 'string') ||
-		!value.messageId ||
-		!(
-			value.readDate === undefined ||
-			value.readDate === null ||
-			typeof value.readDate === 'string'
-		) ||
-		!(
-			value.category === undefined ||
-			value.category === null ||
-			typeof value.category === 'string'
-		) ||
-		typeof value.isAnyFileAttached !== 'boolean' ||
-		!Array.isArray(value.tags) ||
-		value.tags.some((tag: unknown) => typeof tag !== 'string')
-	)
-		throw new LibrusError('PROTOCOL_ERROR');
+	for (const key of strings) {
+		if (typeof value[key] !== 'string' || (key === 'messageId' && !value[key]))
+			throw protocolError(`message.${key}`, value[key]);
+	}
 	const result = Object.fromEntries(strings.map((key) => [key, value[key]])) as unknown as Message;
-	result.readDate = value.readDate ?? null;
-	result.category = value.category ?? null;
+	for (const key of ['readDate', 'category'] as const) {
+		const field = value[key];
+		if (field !== undefined && field !== null && typeof field !== 'string')
+			throw protocolError(`message.${key}`, field);
+		result[key] = field ?? null;
+	}
+	if (typeof value.isAnyFileAttached !== 'boolean')
+		throw protocolError('message.isAnyFileAttached', value.isAnyFileAttached);
+	if (!Array.isArray(value.tags)) throw protocolError('message.tags', value.tags);
+	for (const tag of value.tags) {
+		if (typeof tag !== 'string') throw protocolError('message.tags', tag);
+	}
 	result.isAnyFileAttached = value.isAnyFileAttached;
 	result.tags = value.tags as string[];
 	if (includeContent) {
@@ -276,8 +296,8 @@ export class LibrusClient {
 			} catch {
 				throw new LibrusError('TRANSPORT_ERROR');
 			}
-			if (typeof response.body !== 'string' || response.body.length > 10_000_000)
-				throw new LibrusError('PROTOCOL_ERROR');
+			if (typeof response.body !== 'string') throw protocolError('HTTP body type', response.body);
+			if (response.body.length > 10_000_000) throw protocolError('HTTP body size');
 			const normalized = Object.fromEntries(
 				Object.entries(response.headers).map(([key, val]) => [key.toLowerCase(), val]),
 			);
@@ -290,14 +310,14 @@ export class LibrusClient {
 				try {
 					await this.jar.setCookie(entry, url.href);
 				} catch {
-					throw new LibrusError('PROTOCOL_ERROR');
+					throw protocolError('response cookie');
 				}
 			}
 			if ([301, 302, 303, 307, 308].includes(response.statusCode)) {
 				// Never replay a credential-bearing POST, including on a same-host redirect.
-				if (body !== undefined) throw new LibrusError('PROTOCOL_ERROR');
+				if (body !== undefined) throw protocolError('POST redirect');
 				const location = normalized.location;
-				if (typeof location !== 'string') throw new LibrusError('PROTOCOL_ERROR');
+				if (typeof location !== 'string') throw protocolError('redirect location', location);
 				url = checkedRedirect(location, url.href);
 				continue;
 			}
@@ -315,37 +335,43 @@ export class LibrusClient {
 				throw new LibrusError('SERVICE_ERROR');
 			return { ...response, url };
 		}
-		throw new LibrusError('PROTOCOL_ERROR');
+		throw protocolError('redirect limit');
 	}
 
 	private async authenticate(): Promise<void> {
-		this.jar = new CookieJar();
-		const entry = await this.request('https://synergia.librus.pl/loguj/portalRodzina');
-		if (!authUrl(entry.url)) throw actionRequired('login entry', entry.url);
-		const form = new URLSearchParams({
-			action: 'login',
-			login: this.login.username,
-			pass: this.login.password,
-		});
-		const loginReply = await this.request(entry.url.href, form.toString());
-		if (isHtml(loginReply.body)) throw actionRequired('credential submission', loginReply.url);
-		const reply = parseJson(loginReply.body);
-		if (!object(reply) || typeof reply.goTo !== 'string' || !reply.goTo)
-			throw new LibrusError('AUTH_FAILED');
-		const continuation = checkedUrl(reply.goTo, 'https://api.librus.pl');
-		if (!authUrl(continuation)) throw new LibrusError('UNSAFE_URL');
-		const authorized = await this.request(continuation.href);
-		if (
-			authorized.url.hostname !== 'synergia.librus.pl' ||
-			(/\/loguj(?:\/|$)/.test(authorized.url.pathname) &&
-				!/^\/loguj\/portalRodzina\/?$/.test(authorized.url.pathname)) ||
-			isLoginForm(authorized.body)
-		)
-			throw actionRequired('authorization continuation', authorized.url);
-		await this.request('https://synergia.librus.pl/gateway/api/2.0/Auth/TokenInfo/');
-		const inbox = await this.request('https://synergia.librus.pl/wiadomosci3');
-		if (authUrl(inbox.url) || /\/loguj(?:\/|$)/.test(inbox.url.pathname))
-			throw actionRequired('messages initialization', inbox.url);
+		try {
+			this.jar = new CookieJar();
+			const entry = await this.request('https://synergia.librus.pl/loguj/portalRodzina');
+			if (!authUrl(entry.url)) throw actionRequired('login entry', entry.url);
+			const form = new URLSearchParams({
+				action: 'login',
+				login: this.login.username,
+				pass: this.login.password,
+			});
+			const loginReply = await this.request(entry.url.href, form.toString());
+			if (isHtml(loginReply.body)) throw actionRequired('credential submission', loginReply.url);
+			const reply = parseJson(loginReply.body);
+			if (!object(reply) || typeof reply.goTo !== 'string' || !reply.goTo)
+				throw new LibrusError('AUTH_FAILED');
+			const continuation = checkedUrl(reply.goTo, 'https://api.librus.pl');
+			if (!authUrl(continuation)) throw new LibrusError('UNSAFE_URL');
+			const authorized = await this.request(continuation.href);
+			if (
+				authorized.url.hostname !== 'synergia.librus.pl' ||
+				(/\/loguj(?:\/|$)/.test(authorized.url.pathname) &&
+					!/^\/loguj\/portalRodzina\/?$/.test(authorized.url.pathname)) ||
+				isLoginForm(authorized.body)
+			)
+				throw actionRequired('authorization continuation', authorized.url);
+			await this.request('https://synergia.librus.pl/gateway/api/2.0/Auth/TokenInfo/');
+			const inbox = await this.request('https://synergia.librus.pl/wiadomosci3');
+			if (authUrl(inbox.url) || /\/loguj(?:\/|$)/.test(inbox.url.pathname))
+				throw actionRequired('messages initialization', inbox.url);
+		} catch (error) {
+			if (error instanceof LibrusError && error.code === 'PROTOCOL_ERROR')
+				error.message += ' [Phase: authentication]';
+			throw error;
+		}
 	}
 
 	async getMessages(options: Scan): Promise<Message[]> {
@@ -438,39 +464,49 @@ export class LibrusClient {
 		const found = new Map<string, Message>();
 		const scanned = new Set<string>();
 		for (let page = 1; page <= options.maxPages; page++) {
-			const response = await this.request(
-				`https://wiadomosci.librus.pl/api/inbox/messages?page=${page}&limit=${pageSize}`,
-			);
-			if (authUrl(response.url) || /\/loguj(?:\/|$)/.test(response.url.pathname))
-				throw new LibrusError('SESSION_EXPIRED');
-			if (
-				response.url.hostname !== 'wiadomosci.librus.pl' ||
-				response.url.pathname !== '/api/inbox/messages'
-			)
-				throw new LibrusError('PROTOCOL_ERROR');
-			const payload = parseJson(response.body);
-			if (!object(payload) || !Array.isArray(payload.data) || payload.data.length > pageSize)
-				throw new LibrusError('PROTOCOL_ERROR');
-			const before = scanned.size;
-			for (const raw of payload.data) {
-				const message = parseMessage(
-					raw,
-					options.includeContent && options.contentSource !== 'full',
+			let itemIndex: number | undefined;
+			try {
+				const response = await this.request(
+					`https://wiadomosci.librus.pl/api/inbox/messages?page=${page}&limit=${pageSize}`,
 				);
-				scanned.add(message.messageId);
-				const unread = message.readDate === null || message.readDate === '';
+				if (authUrl(response.url) || /\/loguj(?:\/|$)/.test(response.url.pathname))
+					throw new LibrusError('SESSION_EXPIRED');
 				if (
-					!options.readStatus ||
-					options.readStatus === 'all' ||
-					(options.readStatus === 'unread' ? unread : !unread)
+					response.url.hostname !== 'wiadomosci.librus.pl' ||
+					response.url.pathname !== '/api/inbox/messages'
 				)
-					found.set(message.messageId, message);
+					throw protocolError('inbox destination');
+				const payload = parseJson(response.body);
+				if (!object(payload)) throw protocolError('inbox response object', payload);
+				if (!Array.isArray(payload.data)) throw protocolError('inbox data array', payload.data);
+				if (payload.data.length > pageSize) throw protocolError('inbox page size', payload.data);
+				const before = scanned.size;
+				for (const [index, raw] of payload.data.entries()) {
+					itemIndex = index + 1;
+					const message = parseMessage(
+						raw,
+						options.includeContent && options.contentSource !== 'full',
+					);
+					scanned.add(message.messageId);
+					const unread = message.readDate === null || message.readDate === '';
+					if (
+						!options.readStatus ||
+						options.readStatus === 'all' ||
+						(options.readStatus === 'unread' ? unread : !unread)
+					)
+						found.set(message.messageId, message);
+				}
+				if (!options.returnAll && found.size >= options.limit)
+					return [...found.values()].slice(0, options.limit);
+				if (payload.data.length === 0) return [...found.values()];
+				if (scanned.size === before) throw new LibrusError('SCAN_INCOMPLETE');
+				if (payload.data.length < pageSize) return [...found.values()];
+			} catch (error) {
+				if (error instanceof LibrusError && error.code === 'PROTOCOL_ERROR') {
+					error.message += ` [Inbox page: ${page}; page size: ${pageSize}${itemIndex === undefined ? '' : `; item: ${itemIndex}`}]`;
+				}
+				throw error;
 			}
-			if (!options.returnAll && found.size >= options.limit)
-				return [...found.values()].slice(0, options.limit);
-			if (payload.data.length === 0) return [...found.values()];
-			if (scanned.size === before) throw new LibrusError('SCAN_INCOMPLETE');
-			if (payload.data.length < pageSize) return [...found.values()];
 		}
 		throw new LibrusError('SCAN_INCOMPLETE');
 	}

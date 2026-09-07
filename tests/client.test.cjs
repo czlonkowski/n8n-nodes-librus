@@ -560,3 +560,106 @@ test('unread full-content recovery retains selected IDs even if earlier detail r
 	);
 	assert.equal(calls.filter((c) => new URL(c.url).pathname === '/api/inbox/messages').length, 1);
 });
+
+// Deliberately invalid synthetic records reproduce the manual/automatic scan difference.
+test('manual sample can succeed while a full scan reports the exact invalid metadata field', async () => {
+	const first = message('synthetic-first');
+	const bad = { ...message('synthetic-private-id'), senderFirstName: null, topic: 'PRIVATE-TOPIC' };
+	assert.equal(
+		(
+			await setup([...auth(), ok({ data: [first] })]).client.getMessages({
+				...options,
+				limit: 1,
+				includeContent: false,
+			})
+		).length,
+		1,
+	);
+	await assert.rejects(
+		setup([...auth(), ok({ data: [first, bad] })]).client.getMessages({
+			...options,
+			returnAll: true,
+			includeContent: false,
+		}),
+		(error) => {
+			assert.equal(error.code, 'PROTOCOL_ERROR');
+			assert.match(error.message, /Check: message.senderFirstName; received type: null/);
+			assert.match(error.message, /Inbox page: 1; page size: 50; item: 2/);
+			assert.doesNotMatch(
+				error.message + error.stack + JSON.stringify(error),
+				/synthetic-private-id|PRIVATE-TOPIC|synthetic-password/,
+			);
+			return true;
+		},
+	);
+});
+for (const [field, value, type] of [
+	['messageId', 1, 'number'],
+	['senderLastName', undefined, 'undefined'],
+	['senderName', ['PRIVATE'], 'array'],
+	['topic', { secret: 'PRIVATE' }, 'object'],
+	['sendDate', false, 'boolean'],
+	['readDate', 7, 'number'],
+	['category', { secret: 'PRIVATE' }, 'object'],
+	['isAnyFileAttached', 1, 'number'],
+	['tags', null, 'null'],
+	['tags', [{ secret: 'PRIVATE' }], 'object'],
+]) {
+	test(`metadata diagnostic identifies ${field} of type ${type} without its value`, async () => {
+		await assert.rejects(
+			setup([
+				...auth(),
+				ok({ data: [{ ...message('PRIVATE-ID'), [field]: value }] }),
+			]).client.getMessages(options),
+			(error) => {
+				assert.ok(error.message.includes(`Check: message.${field}; received type: ${type}`));
+				assert.doesNotMatch(error.message + JSON.stringify(error), /PRIVATE|synthetic-password/);
+				return true;
+			},
+		);
+	});
+}
+test('later-page protocol errors identify the page without treating the scan as complete', async () => {
+	const firstPage = Array.from({ length: 50 }, (_, i) => message(i));
+	await assert.rejects(
+		setup([
+			...auth(),
+			ok({ data: firstPage }),
+			ok({ data: { secret: 'PRIVATE' } }),
+		]).client.getMessages({
+			...options,
+			returnAll: true,
+		}),
+		(error) => {
+			assert.match(error.message, /Check: inbox data array; received type: object/);
+			assert.match(error.message, /Inbox page: 2; page size: 50/);
+			assert.doesNotMatch(error.message, /PRIVATE|item:/);
+			return true;
+		},
+	);
+});
+test('non-JSON inbox response has a safe diagnostic instead of copying HTML', async () => {
+	await assert.rejects(
+		setup([...auth(), ok('<html>PRIVATE-PAGE</html>')]).client.getMessages(options),
+		(error) => {
+			assert.match(error.message, /Check: HTML instead of JSON/);
+			assert.match(error.message, /Inbox page: 1/);
+			assert.doesNotMatch(error.message, /PRIVATE-PAGE/);
+			return true;
+		},
+	);
+});
+test('protocol errors during authentication are identified without raw response data', async () => {
+	await assert.rejects(
+		setup([...auth().slice(0, 2), ok('PRIVATE-NOT-JSON')]).client.getMessages(options),
+		(error) => {
+			assert.match(error.message, /Check: JSON response/);
+			assert.match(error.message, /Phase: authentication/);
+			assert.doesNotMatch(
+				error.message + JSON.stringify(error),
+				/PRIVATE-NOT-JSON|synthetic-password/,
+			);
+			return true;
+		},
+	);
+});

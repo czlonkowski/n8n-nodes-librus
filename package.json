@@ -1,6 +1,6 @@
 {
   "name": "@czlonkowski/n8n-nodes-librus",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Nieoficjalny węzeł społecznościowy n8n do odczytywania wiadomości z Librus Synergia.",
   "license": "MIT",
   "keywords": [
