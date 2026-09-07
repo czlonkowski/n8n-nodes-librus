@@ -1,6 +1,6 @@
 # Live verification checklist
 
-Status: **not yet performed**. Never paste a password or raw message response into a bug report, fixture or terminal command.
+Status: **partially verified on 2026-09-07**. A one-message, metadata-only execution succeeded on one account after fixing the OAuth callback and legacy HTTP redirect handling. Body completeness, unread-state preservation and pagination remain unverified. Never paste a password or raw message response into a bug report, fixture or terminal command.
 
 1. With Node.js 24 active, run `N8N_LISTEN_ADDRESS=127.0.0.1 N8N_PORT=5689 npm run dev`. The isolated profile lives in `../.n8n-librus-dev`; never put it inside this repository. Create credentials inside the n8n UI.
 2. Run the credential test. Record only success or the sanitized error code. Confirm the login works on accounts with and without optional verification prompts; stop when the website requires user action.

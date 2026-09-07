@@ -9,3 +9,11 @@
 - Runtime audit: zero reported vulnerabilities. Development tooling: ten moderate advisories remain after updating n8n-workflow to remove the initial four high-severity reports; see SECURITY.md.
 
 These checks establish package loading and offline behaviour. They do not establish successful live authentication, body completeness, unread-state preservation, pagination semantics or safe unattended polling frequency.
+
+## Live login correction — 2026-09-07
+
+The user's manual n8n workflow initially returned ACTION_REQUIRED. A diagnostic retry identified the terminal page as the Synergia OAuth callback. The client had incorrectly classified every `/loguj/` path as a login prompt. Allowing the callback exposed a legacy HTTP redirect during the subsequent handoff. Trusted-host HTTP redirects are now upgraded to HTTPS before any request; all other URL checks remain in force.
+
+After both fixes, the same workflow succeeded with Limit 1 and Include Content off. The output contained one item with messageId, senderName and readDate fields. Credentials were used through the existing n8n credential entry; no password, cookie, authorization code or message value was copied into this repository or these notes. Browser-session effects, unread-state preservation, content completeness and live pagination were not measured.
+
+`npm run check` passed all 40 tests, including successful callback handling, failed post-callback access, retained login challenges, redacted diagnostics and HTTP-to-HTTPS redirect upgrade boundaries.

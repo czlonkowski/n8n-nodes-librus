@@ -156,7 +156,7 @@ test('challenge page produces an action-required error', async () => {
 });
 for (const url of [
 	'https://evil.example/steal',
-	'http://api.librus.pl/OAuth/Authorization',
+	'http://evil.example/OAuth/Authorization',
 	'https://api.librus.pl:444/OAuth/Authorization',
 	'https://name:secret@api.librus.pl/OAuth/Authorization',
 	'https://api.librus.pl.evil.example/',
@@ -269,5 +269,66 @@ test('a deadline reached during cookie preparation never sends a zero-timeout re
 		assert.equal(instance.calls.length, 0);
 	} finally {
 		Date.now = originalNow;
+	}
+});
+
+test('successful authorization may finish at the Synergia OAuth callback', async () => {
+	const replies = auth();
+	replies[3] = redirect(
+		'https://synergia.librus.pl/loguj/portalRodzina?code=synthetic-code&state=synthetic-state',
+	);
+	const { client, calls } = setup([...replies, ok({ data: [message(1)] })]);
+	assert.equal((await client.getMessages(options))[0].messageId, '1');
+	assert.ok(calls.some((request) => request.url.endsWith('/Auth/TokenInfo/')));
+});
+
+test('an OAuth callback does not bypass the subsequent authenticated access check', async () => {
+	const replies = auth();
+	replies[3] = redirect('https://synergia.librus.pl/loguj/portalRodzina?code=synthetic-code');
+	replies[5] = { statusCode: 401, headers: {}, body: '' };
+	const { client, calls } = setup(replies);
+	await assert.rejects(client.getMessages(options), { code: 'SESSION_EXPIRED' });
+	assert.equal(calls.filter((request) => request.method === 'POST').length, 1);
+	assert.ok(!calls.some((request) => request.url.includes('/api/inbox/messages')));
+});
+
+test('a login form at the callback still stops, and diagnostics exclude URL secrets', async () => {
+	const replies = auth();
+	replies[3] = redirect(
+		'https://synergia.librus.pl/loguj/portalRodzina?code=private-code&state=private-state',
+	);
+	replies[4] = ok('<html><form><input name="Login"><input name="Pass"></form></html>');
+	await assert.rejects(setup(replies).client.getMessages(options), (error) => {
+		assert.equal(error.code, 'ACTION_REQUIRED');
+		assert.match(error.message, /Step: authorization continuation; page: Synergia OAuth callback/);
+		assert.doesNotMatch(
+			error.stack + JSON.stringify(error),
+			/private-code|private-state|synthetic-password/,
+		);
+		return true;
+	});
+});
+
+test('legacy HTTP redirects to trusted Librus hosts are upgraded before sending', async () => {
+	const replies = auth();
+	replies[0] = redirect('http://api.librus.pl/OAuth/Authorization?client_id=46');
+	replies[6] = redirect('http://wiadomosci.librus.pl/nowy/inbox');
+	const { client, calls } = setup([...replies, ok({ data: [message(1)] })]);
+	assert.equal((await client.getMessages(options))[0].messageId, '1');
+	assert.ok(calls.every((request) => request.url.startsWith('https://')));
+});
+
+test('HTTP redirect upgrade never permits URL credentials or a non-default port', async () => {
+	for (const url of [
+		'http://user:private-password@api.librus.pl/OAuth/Authorization',
+		'http://api.librus.pl:444/OAuth/Authorization',
+	]) {
+		const { client, calls } = setup([redirect(url)]);
+		await assert.rejects(client.getMessages(options), (error) => {
+			assert.equal(error.code, 'UNSAFE_URL');
+			assert.doesNotMatch(error.message, /private-password/);
+			return true;
+		});
+		assert.equal(calls.length, 1);
 	}
 });

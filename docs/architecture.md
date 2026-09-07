@@ -10,7 +10,7 @@ No process-global cache, workflow static data, environment secret or file stores
 
 1. GET `https://synergia.librus.pl/loguj/portalRodzina` and follow the browser authorization redirects.
 2. POST form fields `action=login`, `login`, and `pass` to the resulting validated HTTPS `api.librus.pl/OAuth/Authorization` route.
-3. Follow the returned `goTo` authorization continuation. A terminal verification page stops with `ACTION_REQUIRED`.
+3. Follow the returned `goTo` authorization continuation. A successful flow may terminate at Synergia `/loguj/portalRodzina`; this callback is allowed, with TokenInfo and inbox access still checked afterward. A terminal verification page stops with `ACTION_REQUIRED`.
 4. Request `/gateway/api/2.0/Auth/TokenInfo/` on Synergia.
 5. Initialize messages through `https://synergia.librus.pl/wiadomosci3`.
 6. GET `https://wiadomosci.librus.pl/api/inbox/messages?page=1&limit=50` and paginate its `data` array.
@@ -19,7 +19,7 @@ These are unofficial website routes, not a contracted public API. No verified re
 
 ## Boundaries
 
-HTTPS and four exact Librus hostnames are allowlisted. Every redirect is checked before a request is issued. URL credentials and non-default ports are rejected. Password-bearing POSTs are restricted to the authorization route and never automatically redirected or replayed. Cookies are obtained from the jar separately for each URL.
+HTTPS and four exact Librus hostnames are allowlisted. Every redirect is checked before a request is issued. Legacy HTTP Location headers targeting exact allowlisted hosts are upgraded to HTTPS before sending; no request is made over HTTP. URL credentials and non-default ports are rejected. Password-bearing POSTs are restricted to the authorization route and never automatically redirected or replayed. Cookies are obtained from the jar separately for each URL.
 
 Requests time out after at most 15 seconds. An operation is bounded to 120 seconds and 100 requests, including a possible second login. Redirect chains stop after 10 redirects. A recognized session expiry during a scan allows one fresh login and restarts the scan, discarding partial results. Generic HTML, malformed JSON and schema mismatches fail rather than returning an empty inbox. A short page is treated as end-of-list; this assumption must be verified live. Pagination is not a transactional snapshot when messages arrive mid-scan.
 

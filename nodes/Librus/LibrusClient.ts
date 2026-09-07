@@ -51,9 +51,35 @@ const messages: Record<string, string> = {
 		'The inbox scan could not finish within its safety limits. Increase Maximum Pages or use a bounded Limit.',
 	INVALID_OPTIONS: 'Invalid Librus credentials or scan options.',
 };
+type AuthStage =
+	| 'login entry'
+	| 'credential submission'
+	| 'authorization continuation'
+	| 'messages initialization';
+type AuthDestination =
+	| 'OAuth authorization'
+	| 'Synergia OAuth callback'
+	| 'Synergia login'
+	| 'Synergia page'
+	| 'messages service'
+	| 'other allowed page';
+
 export class LibrusError extends Error {
-	constructor(public readonly code: string) {
-		super(messages[code] ?? messages.PROTOCOL_ERROR);
+	constructor(
+		public readonly code: string,
+		stage?: AuthStage,
+		destination?: AuthDestination,
+		rejection?:
+			| 'non-HTTPS destination'
+			| 'URL credentials'
+			| 'non-default port'
+			| 'unrecognized hostname',
+	) {
+		super(
+			(messages[code] ?? messages.PROTOCOL_ERROR) +
+				(stage ? ` [Step: ${stage}; page: ${destination}]` : '') +
+				(rejection ? ` [Redirect rejected: ${rejection}]` : ''),
+		);
 	}
 }
 export function safeError(error: unknown): LibrusError {
@@ -79,12 +105,53 @@ function checkedUrl(value: string, base?: string): URL {
 		url.password ||
 		!allowedHosts.has(url.hostname)
 	) {
-		throw new LibrusError('UNSAFE_URL');
+		const rejection =
+			url.protocol !== 'https:'
+				? 'non-HTTPS destination'
+				: url.username || url.password
+					? 'URL credentials'
+					: url.port
+						? 'non-default port'
+						: 'unrecognized hostname';
+		throw new LibrusError('UNSAFE_URL', undefined, undefined, rejection);
 	}
 	return url;
 }
+function checkedRedirect(value: string, base: string): URL {
+	let url: URL;
+	try {
+		url = new URL(value, base);
+	} catch {
+		throw new LibrusError('UNSAFE_URL');
+	}
+	// Legacy Location headers can use HTTP. Only upgrade exact trusted hosts;
+	// requests themselves always use HTTPS, including the first redirected hop.
+	if (
+		url.protocol === 'http:' &&
+		allowedHosts.has(url.hostname) &&
+		!url.port &&
+		!url.username &&
+		!url.password
+	)
+		url.protocol = 'https:';
+	return checkedUrl(url.href);
+}
 function authUrl(url: URL): boolean {
 	return url.hostname === 'api.librus.pl' && /^\/OAuth\/Authorization(?:\/|$)/.test(url.pathname);
+}
+function actionRequired(stage: AuthStage, url: URL): LibrusError {
+	const destination: AuthDestination = authUrl(url)
+		? 'OAuth authorization'
+		: url.hostname === 'synergia.librus.pl' && url.pathname === '/loguj/portalRodzina'
+			? 'Synergia OAuth callback'
+			: url.hostname === 'synergia.librus.pl' && /^\/loguj(?:\/|$)/.test(url.pathname)
+				? 'Synergia login'
+				: url.hostname === 'synergia.librus.pl'
+					? 'Synergia page'
+					: url.hostname === 'wiadomosci.librus.pl'
+						? 'messages service'
+						: 'other allowed page';
+	return new LibrusError('ACTION_REQUIRED', stage, destination);
 }
 function object(value: unknown): value is Record<string, unknown> {
 	return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -217,7 +284,7 @@ export class LibrusClient {
 				if (body !== undefined) throw new LibrusError('PROTOCOL_ERROR');
 				const location = normalized.location;
 				if (typeof location !== 'string') throw new LibrusError('PROTOCOL_ERROR');
-				url = checkedUrl(location, url.href);
+				url = checkedRedirect(location, url.href);
 				continue;
 			}
 			if (response.statusCode === 429) throw new LibrusError('RATE_LIMITED');
@@ -240,14 +307,14 @@ export class LibrusClient {
 	private async authenticate(): Promise<void> {
 		this.jar = new CookieJar();
 		const entry = await this.request('https://synergia.librus.pl/loguj/portalRodzina');
-		if (!authUrl(entry.url)) throw new LibrusError('ACTION_REQUIRED');
+		if (!authUrl(entry.url)) throw actionRequired('login entry', entry.url);
 		const form = new URLSearchParams({
 			action: 'login',
 			login: this.login.username,
 			pass: this.login.password,
 		});
 		const loginReply = await this.request(entry.url.href, form.toString());
-		if (isHtml(loginReply.body)) throw new LibrusError('ACTION_REQUIRED');
+		if (isHtml(loginReply.body)) throw actionRequired('credential submission', loginReply.url);
 		const reply = parseJson(loginReply.body);
 		if (!object(reply) || typeof reply.goTo !== 'string' || !reply.goTo)
 			throw new LibrusError('AUTH_FAILED');
@@ -256,13 +323,15 @@ export class LibrusClient {
 		const authorized = await this.request(continuation.href);
 		if (
 			authorized.url.hostname !== 'synergia.librus.pl' ||
-			/\/loguj(?:\/|$)/.test(authorized.url.pathname)
+			(/\/loguj(?:\/|$)/.test(authorized.url.pathname) &&
+				!/^\/loguj\/portalRodzina\/?$/.test(authorized.url.pathname)) ||
+			isLoginForm(authorized.body)
 		)
-			throw new LibrusError('ACTION_REQUIRED');
+			throw actionRequired('authorization continuation', authorized.url);
 		await this.request('https://synergia.librus.pl/gateway/api/2.0/Auth/TokenInfo/');
 		const inbox = await this.request('https://synergia.librus.pl/wiadomosci3');
 		if (authUrl(inbox.url) || /\/loguj(?:\/|$)/.test(inbox.url.pathname))
-			throw new LibrusError('ACTION_REQUIRED');
+			throw actionRequired('messages initialization', inbox.url);
 	}
 
 	async getMessages(options: Scan): Promise<Message[]> {

@@ -2,7 +2,7 @@
 
 # n8n-nodes-librus
 
-An open-source, unofficial n8n community node for reading Librus Synergia inbox messages. MIT licensed. Experimental: the implementation is based on inspected community clients and synthetic fixtures; successful login and inbox behaviour on a real account have not yet been verified.
+An open-source, unofficial n8n community node for reading Librus Synergia inbox messages. MIT licensed. Experimental: login and a one-message metadata read have succeeded on one live account. Message-body completeness, unread-state preservation, live pagination and unattended polling behaviour still need verification.
 
 ## What works in this first version
 

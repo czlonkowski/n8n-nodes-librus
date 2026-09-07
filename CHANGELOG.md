@@ -10,3 +10,5 @@
 - Document unverified live behaviours and the notification workflow roadmap.
 - Add an original book-and-message logo with a coral unread indicator.
 - Keep the development profile outside the repository to prevent recursive symlink scans.
+- Accept the successful Synergia OAuth callback and include redacted authentication-stage diagnostics in verification errors.
+- Upgrade legacy HTTP redirects to HTTPS for exact trusted Librus hosts before sending any request.
