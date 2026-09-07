@@ -332,3 +332,126 @@ test('HTTP redirect upgrade never permits URL credentials or a non-default port'
 		assert.equal(calls.length, 1);
 	}
 });
+
+const fullOptions = { ...options, includeContent: true, contentSource: 'full' };
+const detail = (id, body) =>
+	ok({ data: { messageId: String(id), Message: Buffer.from(body).toString('base64') } });
+
+test('full content is fetched from message details instead of the truncated listing', async () => {
+	const fullBody = '<p>Pełna wiadomość: zażółć gęślą jaźń.</p>'.repeat(40);
+	const { client, calls } = setup([...auth(), ok({ data: [message(1)] }), detail(1, fullBody)]);
+	const result = await client.getMessages(fullOptions);
+	assert.equal(result[0].content, fullBody);
+	assert.equal(result[0].contentSource, 'full');
+	assert.equal(calls.at(-1).url, 'https://wiadomosci.librus.pl/api/inbox/messages/1');
+	assert.equal(calls.filter((r) => r.method === 'POST').length, 1);
+});
+
+test('preview remains the default and makes no detail request', async () => {
+	const { client, calls } = setup([...auth(), ok({ data: [message(1)] })]);
+	const result = await client.getMessages({ ...options, includeContent: true });
+	assert.equal(result[0].contentSource, 'preview');
+	assert.equal(calls.length, 9);
+});
+
+test('full source has no effect when Include Content is disabled', async () => {
+	const { client, calls } = setup([...auth(), ok({ data: [message(1)] })]);
+	const result = await client.getMessages({ ...fullOptions, includeContent: false });
+	assert.equal(result[0].content, undefined);
+	assert.equal(result[0].contentSource, undefined);
+	assert.equal(calls.length, 9);
+});
+
+test('full detail requests run only after pagination, limit and deduplication', async () => {
+	const { client, calls } = setup([
+		...auth(),
+		ok({ data: [message(1), message(1)] }),
+		ok({ data: [message(2)] }),
+		detail(1, 'First complete message'),
+		detail(2, 'Second complete message'),
+	]);
+	const result = await client.getMessages({ ...fullOptions, limit: 2 });
+	assert.deepEqual(
+		result.map((m) => m.content),
+		['First complete message', 'Second complete message'],
+	);
+	assert.match(calls[9].url, /messages\?page=2&limit=2$/);
+	assert.equal(calls.filter((r) => /messages\/1$/.test(r.url)).length, 1);
+});
+
+test('full mode does not depend on the listing preview being valid base64', async () => {
+	const { client } = setup([
+		...auth(),
+		ok({ data: [{ ...message(1), content: 'truncated-invalid-preview' }] }),
+		detail(1, 'Complete content'),
+	]);
+	assert.equal((await client.getMessages(fullOptions))[0].content, 'Complete content');
+});
+
+for (const payload of [
+	{},
+	{ data: null },
+	{ data: { messageId: 'another-message', Message: 'eA==' } },
+	{ data: { messageId: '1', content: 'eA==' } },
+	{ data: { messageId: '1', Message: '!!!!' } },
+]) {
+	test('invalid or mismatched detail fails without falling back to a misleading preview', async () => {
+		await assert.rejects(
+			setup([...auth(), ok({ data: [message(1)] }), ok(payload)]).client.getMessages(fullOptions),
+			{ code: 'PROTOCOL_ERROR' },
+		);
+	});
+}
+
+test('an incomplete listing never triggers full-content requests', async () => {
+	const { client, calls } = setup([
+		...auth(),
+		ok({ data: Array.from({ length: 50 }, (_, i) => message(i)) }),
+	]);
+	await assert.rejects(client.getMessages({ ...fullOptions, returnAll: true, maxPages: 1 }), {
+		code: 'SCAN_INCOMPLETE',
+	});
+	assert.equal(calls.length, 9);
+});
+
+test('the full-content safety cap fails before fetching any details', async () => {
+	const { client, calls } = setup([
+		...auth(),
+		ok({ data: Array.from({ length: 50 }, (_, i) => message(i)) }),
+		ok({ data: [message(50)] }),
+	]);
+	await assert.rejects(client.getMessages({ ...fullOptions, limit: 51 }), {
+		code: 'FULL_CONTENT_LIMIT',
+	});
+	assert.equal(calls.length, 10);
+});
+
+test('a detail failure returns no partial result and does not retry a generic 403', async () => {
+	const { client, calls } = setup([
+		...auth(),
+		ok({ data: [message(1), message(2)] }),
+		detail(1, 'Complete first message'),
+		{ statusCode: 403, headers: {}, body: 'private body' },
+	]);
+	await assert.rejects(client.getMessages(fullOptions), { code: 'ACCESS_DENIED' });
+	assert.equal(calls.filter((r) => r.method === 'POST').length, 1);
+});
+
+test('one recognized detail-session expiry restarts the complete scan', async () => {
+	const { client, calls } = setup([
+		...auth(),
+		ok({ data: [message(1)] }),
+		{ statusCode: 401, headers: {}, body: '' },
+		...auth(),
+		ok({ data: [message(1)] }),
+		detail(1, 'Complete after recovery'),
+	]);
+	assert.equal((await client.getMessages(fullOptions))[0].content, 'Complete after recovery');
+	assert.equal(calls.filter((r) => r.method === 'POST').length, 2);
+});
+
+test('unsafe message IDs never become detail paths', async () => {
+	const { client, calls } = setup([...auth(), ok({ data: [message('../private')] })]);
+	await assert.rejects(client.getMessages(fullOptions), { code: 'PROTOCOL_ERROR' });
+	assert.equal(calls.length, 9);
+});

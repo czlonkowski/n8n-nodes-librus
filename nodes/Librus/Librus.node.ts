@@ -8,7 +8,7 @@ import type {
 	INodeType,
 	INodeTypeDescription,
 } from 'n8n-workflow';
-import { LibrusClient, LibrusError, safeError } from './LibrusClient';
+import { LibrusClient, LibrusError, safeError, type ContentSource } from './LibrusClient';
 import { createTransport, createCredentialTestTransport } from './transport';
 
 export class Librus implements INodeType {
@@ -87,7 +87,37 @@ export class Librus implements INodeType {
 				type: 'boolean',
 				default: false,
 				description:
-					'Whether to decode content supplied by the inbox listing. This may contain HTML and personal information; completeness is unverified.',
+					'Whether to include the message preview or fetch the full message body. Full messages may be marked as read by Librus.',
+			},
+			{
+				displayName: 'Content Source',
+				name: 'contentSource',
+				type: 'options',
+				noDataExpression: true,
+				displayOptions: { show: { includeContent: [true] } },
+				options: [
+					{
+						name: 'Preview',
+						value: 'preview',
+						description: 'Read the shortened content from the inbox listing',
+					},
+					{
+						name: 'Full Message',
+						value: 'full',
+						description: 'Fetch the full body for each message; this may mark it as read',
+					},
+				],
+				default: 'preview',
+				description:
+					'Where to retrieve message content. Full Message makes an additional request for each message.',
+			},
+			{
+				displayName:
+					'Fetching full messages may mark them as read in Librus. Up to 50 full messages can be fetched per execution.',
+				name: 'fullContentNotice',
+				type: 'notice',
+				default: '',
+				displayOptions: { show: { includeContent: [true], contentSource: ['full'] } },
 			},
 		],
 	};
@@ -146,6 +176,11 @@ export class Librus implements INodeType {
 					limit: returnAll ? 50 : (this.getNodeParameter('limit', itemIndex) as number),
 					maxPages: this.getNodeParameter('maxPages', itemIndex) as number,
 					includeContent: this.getNodeParameter('includeContent', itemIndex) as boolean,
+					contentSource: this.getNodeParameter(
+						'contentSource',
+						itemIndex,
+						'preview',
+					) as ContentSource,
 				});
 				output.push(
 					...result.map((message) => ({ json: { ...message }, pairedItem: { item: itemIndex } })),

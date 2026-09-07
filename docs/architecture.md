@@ -4,7 +4,7 @@
 
 A programmatic node is necessary because login, redirects, cookie handling and paginated message retrieval are dependent requests. `Librus.node.ts` owns n8n parameters, credentials, item pairing and conversion of safe errors. `LibrusClient.ts` owns the session and response validation. `transport.ts` adapts n8n's modern execution helper and legacy-only credential-test helper.
 
-No process-global cache, workflow static data, environment secret or file stores authentication state. Each client owns a `tough-cookie` jar. The node never outputs cookies, passwords, raw HTTP errors or login response bodies. Node errors are reconstructed from fixed messages. Downstream output deliberately includes message metadata, and optionally the listing's content.
+No process-global cache, workflow static data, environment secret or file stores authentication state. Each client owns a `tough-cookie` jar. The node never outputs cookies, passwords, raw HTTP errors or login response bodies. Node errors are reconstructed from fixed messages. Downstream output deliberately includes message metadata and optional preview or full content, identified by `contentSource`. Preview remains the default for existing workflows.
 
 ## Observed community protocol
 
@@ -13,7 +13,8 @@ No process-global cache, workflow static data, environment secret or file stores
 3. Follow the returned `goTo` authorization continuation. A successful flow may terminate at Synergia `/loguj/portalRodzina`; this callback is allowed, with TokenInfo and inbox access still checked afterward. A terminal verification page stops with `ACTION_REQUIRED`.
 4. Request `/gateway/api/2.0/Auth/TokenInfo/` on Synergia.
 5. Initialize messages through `https://synergia.librus.pl/wiadomosci3`.
-6. GET `https://wiadomosci.librus.pl/api/inbox/messages?page=1&limit=50` and paginate its `data` array.
+6. GET `https://wiadomosci.librus.pl/api/inbox/messages?page=1&limit=50` and paginate its `data` array. Its `content` field is a truncated preview.
+7. Only when Include Content is enabled and Content Source is Full Message, fetch `/api/inbox/messages/{messageId}` for each selected message in the same session. Validate the returned ID and decode the case-sensitive `data.Message` field as the full body.
 
 These are unofficial website routes, not a contracted public API. No verified refresh-token operation is implemented. TokenInfo success is not sufficient proof of inbox access; the credential test also validates a listing response.
 
@@ -32,3 +33,7 @@ No scheduling or cross-execution deduplication lives in the action node. Notific
 - [n8n community-node development](https://docs.n8n.io/integrations/creating-nodes/overview/): package and node conventions.
 
 Implementation was written independently from these protocol observations. Source inspection and offline fixture success are not live integration evidence.
+
+## Full message retrieval
+
+Complete pagination and deduplication before issuing detail requests. Reject more than 50 selected messages before any detail request. Fetch sequentially within the existing 100-request/120-second operation budget, with one recognized session-expiry recovery for the whole operation. Fail on missing/mismatched details or invalid base64; never silently fall back to preview. No partial output is emitted. Detail requests may affect unread state; previous reads cannot be rolled back on a later failure. The returned readDate remains the pre-detail listing snapshot. Message IDs are restricted to safe alphanumeric, underscore and hyphen path segments before detail retrieval.

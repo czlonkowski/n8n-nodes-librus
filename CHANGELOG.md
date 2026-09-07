@@ -12,3 +12,5 @@
 - Keep the development profile outside the repository to prevent recursive symlink scans.
 - Accept the successful Synergia OAuth callback and include redacted authentication-stage diagnostics in verification errors.
 - Upgrade legacy HTTP redirects to HTTPS for exact trusted Librus hosts before sending any request.
+- Add explicit Preview / Full Message content selection and identify the selected source in output.
+- Fetch full message bodies after list selection, with a 50-message cap and strict detail validation.

@@ -4,13 +4,24 @@
 
 Nieoficjalny węzeł społecznościowy n8n do odczytywania wiadomości z dziennika Librus Synergia. Otwarty kod źródłowy, licencja MIT.
 
-**Projekt jest na etapie eksperymentalnym.** Logowanie i pobranie danych jednej wiadomości sprawdzono na rzeczywistym koncie. Do zweryfikowania pozostają: kompletność treści, zachowanie statusu nieprzeczytanych wiadomości, pobieranie kolejnych stron skrzynki oraz działanie przy cyklicznym uruchamianiu.
+**Projekt jest na etapie eksperymentalnym.** Na rzeczywistym koncie sprawdzono logowanie, pobranie danych jednej wiadomości oraz jej treści z modułu szczegółów. Do zweryfikowania pozostają: zachowanie statusu nieprzeczytanych wiadomości, kompletność treści w różnych typach wiadomości, pobieranie kolejnych stron skrzynki oraz działanie przy cyklicznym uruchamianiu.
 
 ## Dostępne funkcje
 
 Operacja **Librus → Message → Get Many** loguje się do Librusa, otwiera sesję modułu wiadomości i zwraca każdą wiadomość jako osobny element danych n8n.
 
-Można pobrać określoną liczbę wiadomości albo całą skrzynkę, strona po stronie. Wynik zawiera identyfikator wiadomości zapisany jako tekst, dane nadawcy, temat, daty w oryginalnym formacie, datę odczytania, informację o załącznikach i tagi. Opcja **Include Content** dołącza treść udostępnioną przez listę wiadomości: dekoduje ją z base64 do UTF-8, zachowując HTML. Jej kompletność wymaga jeszcze porównania z dziennikiem.
+Można pobrać określoną liczbę wiadomości albo całą skrzynkę, strona po stronie. Wynik zawiera identyfikator wiadomości zapisany jako tekst, dane nadawcy, temat, daty w oryginalnym formacie, datę odczytania, informację o załącznikach i tagi. Opcja **Include Content** dołącza treść, a **Content Source** określa jej źródło:
+
+| Content Source | Zawartość pola `content` |
+| --- | --- |
+| **Preview** — domyślnie | Skrót z listy wiadomości. Może urwać się w środku zdania. |
+| **Full Message** | Treść pobrana osobno ze szczegółów każdej wiadomości. |
+
+W obu trybach treść jest dekodowana z base64 do UTF-8, z zachowaniem HTML. Pole `contentSource` w wyniku ma wartość `preview` albo `full`. Przy wyłączonym **Include Content** oba pola są pomijane.
+
+**Aby otrzymać pełną treść, włącz Include Content i wybierz Content Source → Full Message.** Samo włączenie Include Content zachowuje dotychczasowe działanie — podgląd z listy. W próbie na rzeczywistym koncie podgląd miał 95 znaków, a odpowiedź ze szczegółów tej samej wiadomości zawierała 463 znaki i zaczynała się od całego podglądu.
+
+Pobranie szczegółów **może oznaczyć wiadomość jako przeczytaną w Librusie**. Nie sprawdzono jeszcze tego efektu na nieprzeczytanej wiadomości; próbę wykonano na wiadomości już przeczytanej. Wybierz Full Message świadomie, szczególnie w przepływach uruchamianych automatycznie.
 
 Węzeł nie udostępnia operacji wysyłania, usuwania, pobierania załączników ani oznaczania wiadomości jako przeczytane. Nadal trzeba sprawdzić, czy samo pobranie listy przez Librusa zmienia status odczytania.
 
@@ -62,9 +73,13 @@ Zgodnie z konwencją paczek n8n pole `peerDependencies` zawiera `n8n-workflow: "
 2. W dzienniku zanotuj, które z ostatnich wiadomości są nieprzeczytane, bez otwierania ich. Zrób to przed testem połączenia: test danych logowania również pobiera jeden wpis z listy wiadomości, choć nie zwraca jego zawartości.
 3. Utwórz przepływ **Manual Trigger → Librus**. Wybierz **Message → Get Many**, wyłącz **Return All**, ustaw **Limit: 10** i pozostaw **Include Content** wyłączone.
 4. Uruchom węzeł i porównaj wyniki z dziennikiem. Odśwież listę w Librusie i sprawdź, czy status nieprzeczytanych wiadomości się nie zmienił.
-5. Włącz **Include Content** i porównaj treść wiadomości wcześniej przeczytanej w dzienniku. Sprawdź także polskie znaki i formatowanie.
+5. Włącz **Include Content**, wybierz **Content Source → Full Message** i porównaj treść wiadomości wcześniej przeczytanej w dzienniku. Sprawdź także polskie znaki i formatowanie. Na pierwszą próbę ustaw **Limit: 1**.
 
 Parametr **Maximum Pages** domyślnie wynosi 20, a jego maksymalna wartość to 50. Jedno żądanie pobiera do 50 wpisów. Po osiągnięciu limitu stron, żądań lub czasu węzeł zgłasza błąd zamiast zwracać niepełny wynik. Daty pozostają w formacie źródłowym, ponieważ interpretacja strefy czasowej nie została jeszcze zweryfikowana.
+
+Tryb **Full Message** obsługuje do **50 wiadomości na wykonanie**. Szczegóły są pobierane kolejno, w tej samej sesji, dopiero po zakończeniu pobierania listy, zastosowaniu limitu i usunięciu duplikatów identyfikatorów. Jeśli wynik zawiera więcej niż 50 wiadomości, węzeł zgłosi `FULL_CONTENT_LIMIT` przed pobraniem szczegółów. Wyłącz wtedy Return All i ustaw Limit na 50 lub mniej.
+
+Błąd pobrania szczegółów zatrzymuje wykonanie — węzeł nie zastępuje brakującej pełnej treści skrótem. Nie zwraca też częściowego wyniku, choć wcześniejsze żądania szczegółów mogły już wpłynąć na status odczytania w Librusie. Pole `readDate` pochodzi z listy pobranej przed odczytem szczegółów.
 
 Po włączeniu **Include Content** treść wiadomości trafia do zwykłych danych wykonania n8n. Jej przechowywanie zależy od ustawień zapisywania i usuwania historii wykonań. Jeśli wyświetlasz zwrócony HTML w innej aplikacji, potraktuj go jako niezaufaną treść.
 

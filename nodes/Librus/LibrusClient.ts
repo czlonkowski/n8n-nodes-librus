@@ -17,11 +17,13 @@ export interface Login {
 	username: string;
 	password: string;
 }
+export type ContentSource = 'preview' | 'full';
 export interface Scan {
 	returnAll: boolean;
 	limit: number;
 	maxPages: number;
 	includeContent: boolean;
+	contentSource?: ContentSource;
 }
 export interface Message {
 	messageId: string;
@@ -35,6 +37,7 @@ export interface Message {
 	tags: string[];
 	category: string | null;
 	content?: string;
+	contentSource?: ContentSource;
 }
 
 const messages: Record<string, string> = {
@@ -49,6 +52,8 @@ const messages: Record<string, string> = {
 	SERVICE_ERROR: 'Librus is unavailable or returned an unexpected HTTP status.',
 	SCAN_INCOMPLETE:
 		'The inbox scan could not finish within its safety limits. Increase Maximum Pages or use a bounded Limit.',
+	FULL_CONTENT_LIMIT:
+		'Full message content is limited to 50 messages per execution. Turn off Return All and set Limit to 50 or less.',
 	INVALID_OPTIONS: 'Invalid Librus credentials or scan options.',
 };
 type AuthStage =
@@ -221,7 +226,10 @@ function parseMessage(value: unknown, includeContent: boolean): Message {
 	result.category = value.category ?? null;
 	result.isAnyFileAttached = value.isAnyFileAttached;
 	result.tags = value.tags as string[];
-	if (includeContent) result.content = decodeContent(value.content);
+	if (includeContent) {
+		result.content = decodeContent(value.content);
+		result.contentSource = 'preview';
+	}
 	return result;
 }
 
@@ -292,7 +300,7 @@ export class LibrusClient {
 			if (
 				(response.statusCode === 403 || response.statusCode === 200) &&
 				url.hostname === 'wiadomosci.librus.pl' &&
-				url.pathname === '/api/inbox/messages' &&
+				/^\/api\/inbox\/messages(?:\/[A-Za-z0-9_-]+)?$/.test(url.pathname) &&
 				isLoginForm(response.body)
 			)
 				throw new LibrusError('SESSION_EXPIRED');
@@ -343,7 +351,10 @@ export class LibrusClient {
 			options.limit > 1000 ||
 			!Number.isInteger(options.maxPages) ||
 			options.maxPages < 1 ||
-			options.maxPages > 50
+			options.maxPages > 50 ||
+			(options.contentSource !== undefined &&
+				options.contentSource !== 'preview' &&
+				options.contentSource !== 'full')
 		)
 			throw new LibrusError('INVALID_OPTIONS');
 		this.deadline = Date.now() + 120000;
@@ -351,7 +362,15 @@ export class LibrusClient {
 		await this.authenticate();
 		for (let attempt = 0; attempt < 2; attempt++) {
 			try {
-				return await this.scan(options);
+				const result = await this.scan(options);
+				if (options.includeContent && options.contentSource === 'full') {
+					if (result.length > 50) throw new LibrusError('FULL_CONTENT_LIMIT');
+					for (const message of result) {
+						message.content = await this.fullContent(message.messageId);
+						message.contentSource = 'full';
+					}
+				}
+				return result;
 			} catch (error) {
 				if (!(error instanceof LibrusError) || error.code !== 'SESSION_EXPIRED' || attempt === 1)
 					throw error;
@@ -359,6 +378,20 @@ export class LibrusClient {
 			}
 		}
 		throw new LibrusError('SESSION_EXPIRED');
+	}
+
+	private async fullContent(messageId: string): Promise<string> {
+		if (!/^[A-Za-z0-9_-]+$/.test(messageId)) throw new LibrusError('PROTOCOL_ERROR');
+		const path = `/api/inbox/messages/${encodeURIComponent(messageId)}`;
+		const response = await this.request(`https://wiadomosci.librus.pl${path}`);
+		if (authUrl(response.url) || /\/loguj(?:\/|$)/.test(response.url.pathname))
+			throw new LibrusError('SESSION_EXPIRED');
+		if (response.url.hostname !== 'wiadomosci.librus.pl' || response.url.pathname !== path)
+			throw new LibrusError('PROTOCOL_ERROR');
+		const payload = parseJson(response.body);
+		if (!object(payload) || !object(payload.data) || payload.data.messageId !== messageId)
+			throw new LibrusError('PROTOCOL_ERROR');
+		return decodeContent(payload.data.Message);
 	}
 
 	private async scan(options: Scan): Promise<Message[]> {
@@ -380,7 +413,10 @@ export class LibrusClient {
 				throw new LibrusError('PROTOCOL_ERROR');
 			const before = found.size;
 			for (const raw of payload.data) {
-				const message = parseMessage(raw, options.includeContent);
+				const message = parseMessage(
+					raw,
+					options.includeContent && options.contentSource !== 'full',
+				);
 				found.set(message.messageId, message);
 			}
 			if (!options.returnAll && found.size >= options.limit)
