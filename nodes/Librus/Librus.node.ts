@@ -15,7 +15,7 @@ export class Librus implements INodeType {
 	description: INodeTypeDescription = {
 		displayName: 'Librus',
 		name: 'librus',
-		icon: { light: 'file:librus.svg', dark: 'file:librus.dark.svg' },
+		icon: 'file:librus.png',
 		group: ['input'],
 		version: 1,
 		subtitle: '={{$parameter["operation"] + ": " + $parameter["resource"]}}',

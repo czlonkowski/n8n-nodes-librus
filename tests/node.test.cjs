@@ -17,7 +17,9 @@ test('package entry points load and reference the existing credentials and icons
 		typeof node.methods.credentialTest[node.description.credentials[0].testedBy],
 		'function',
 	);
-	for (const icon of Object.values(node.description.icon))
+	for (const icon of typeof node.description.icon === 'string'
+		? [node.description.icon]
+		: Object.values(node.description.icon))
 		assert.ok(fs.existsSync(`dist/nodes/Librus/${icon.slice(5)}`));
 });
 test('both transport adapters disable automatic redirects and preserve raw response', async () => {

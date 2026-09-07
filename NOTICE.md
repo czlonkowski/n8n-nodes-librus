@@ -1,6 +1,6 @@
 # Notices
 
-This is an independent community integration, not an official LIBRUS product. LIBRUS and Synergia names belong to their respective owners. The envelope icon is original artwork for this project and is not the LIBRUS logo.
+This is an independent community integration, not an official LIBRUS product. LIBRUS and Synergia names belong to their respective owners. The book-and-message icon was generated for this project using OpenAI image generation. It is an independent community symbol and is not the LIBRUS logo.
 
 Protocol research consulted FlakM/librus-rs (MIT) and Mati365/librus-api (MIT); exact revisions are linked in docs/architecture.md. Neither is included as a runtime dependency. Authentication and message handling were implemented independently using those observations.
 

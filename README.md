@@ -1,3 +1,5 @@
+<img src="nodes/Librus/librus.png" alt="Librus community node: open book and message logo" width="112" height="112">
+
 # n8n-nodes-librus
 
 An open-source, unofficial n8n community node for reading Librus Synergia inbox messages. MIT licensed. Experimental: the implementation is based on inspected community clients and synthetic fixtures; successful login and inbox behaviour on a real account have not yet been verified.

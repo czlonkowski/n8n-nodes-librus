@@ -4,7 +4,7 @@ export class LibrusSessionApi implements ICredentialType {
 	name = 'librusSessionApi';
 	displayName = 'Librus Session API';
 	documentationUrl = 'https://portal.librus.pl/rodzina/synergia/loguj';
-	icon = 'file:../nodes/Librus/librus.svg' as const;
+	icon = 'file:../nodes/Librus/librus.png' as const;
 	properties: INodeProperties[] = [
 		{
 			displayName: 'Synergia Login',

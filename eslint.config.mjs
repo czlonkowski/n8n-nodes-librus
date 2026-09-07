@@ -9,6 +9,10 @@ export default [
 			'n8n-nodes-base/node-execute-block-wrong-error-thrown': 'off',
 			// No AI tool exposure for this experimental personal-data integration.
 			'@n8n/community-nodes/node-usable-as-tool': 'off',
+			// Opaque teal tile and transparent exterior give this icon contrast in both themes.
+			'@n8n/community-nodes/icon-prefer-themed-variants': 'off',
+			// Preserve the user-requested generated PNG; n8n supports raster icons.
+			'n8n-nodes-base/node-class-description-icon-not-svg': 'off',
 			// ICredentialTestFunctions exposes only helpers.request in n8n-workflow 2.38.
 			'@n8n/community-nodes/no-deprecated-workflow-functions': 'off',
 		},
