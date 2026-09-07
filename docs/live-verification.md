@@ -2,7 +2,7 @@
 
 Status: **not yet performed**. Never paste a password or raw message response into a bug report, fixture or terminal command.
 
-1. Start an isolated self-hosted n8n profile and load the built package. Create credentials inside the n8n UI.
+1. With Node.js 24 active, run `N8N_LISTEN_ADDRESS=127.0.0.1 N8N_PORT=5689 npm run dev`. The isolated profile lives in `../.n8n-librus-dev`; never put it inside this repository. Create credentials inside the n8n UI.
 2. Run the credential test. Record only success or the sanitized error code. Confirm the login works on accounts with and without optional verification prompts; stop when the website requires user action.
 3. Note the IDs and unread status of a small known set in the Librus UI. Execute Get Many with Limit 10 and Include Content off. Compare sender, subject, ID and dates without saving a private fixture.
 4. Reopen the website and verify unread status is unchanged. This must pass before claiming that polling preserves unread state.

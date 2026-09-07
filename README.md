@@ -17,10 +17,12 @@ Use Node.js 24 LTS (tested with 24.20.0) and npm:
 ```sh
 npm ci
 npm run check
-npm run dev -- --custom-user-folder "$PWD/.n8n-dev"
+N8N_LISTEN_ADDRESS=127.0.0.1 N8N_PORT=5689 npm run dev
 ```
 
-The official `@n8n/node-cli` builds and lints the package. Development mode starts an isolated n8n profile; use `N8N_LISTEN_ADDRESS=127.0.0.1 N8N_PORT=5689` if the default port is occupied. Never commit the development profile or account data.
+The official `@n8n/node-cli` builds and lints the package. The `dev` script stores its isolated profile in `../.n8n-librus-dev`, outside the repository. Keep it outside: the CLI symlinks the repository into the profile, so an in-repository profile creates a recursive directory scan (`ENAMETOOLONG`). The command above binds the editor to loopback port 5689. Never commit the development profile or account data.
+
+Check `node --version` before starting: it must be 24 or newer. `.nvmrc` does not automatically change the active runtime; with nvm installed, run `nvm use` first.
 
 The test suite uses synthetic HTTP fixtures and no real account or network. See [architecture](docs/architecture.md), [live verification](docs/live-verification.md), and [security](SECURITY.md).
 
