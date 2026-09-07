@@ -24,7 +24,7 @@ HTTPS and four exact Librus hostnames are allowlisted. Every redirect is checked
 
 Requests time out after at most 15 seconds. An operation is bounded to 120 seconds and 100 requests, including a possible second login. Redirect chains stop after 10 redirects. A recognized session expiry during a scan allows one fresh login and restarts the scan, discarding partial results. Generic HTML, malformed JSON and schema mismatches fail rather than returning an empty inbox. A short page is treated as end-of-list; this assumption must be verified live. Pagination is not a transactional snapshot when messages arrive mid-scan.
 
-No scheduling or cross-execution deduplication lives in the action node. Notification workflows will own account-scoped durable cursors and delivery state. Reading listing entries does not explicitly call a mark-read endpoint; side effects still need live measurement.
+No scheduling or cross-execution deduplication lives in the action node. The separate Librus Trigger owns account-scoped discovery history; downstream workflows own delivery state. Reading listing entries does not explicitly call a mark-read endpoint; side effects still need live measurement.
 
 ## Source references
 
@@ -37,3 +37,17 @@ Implementation was written independently from these protocol observations. Sourc
 ## Full message retrieval
 
 Complete pagination and deduplication before issuing detail requests. Reject more than 50 selected messages before any detail request. Fetch sequentially within the existing 100-request/120-second operation budget, with one recognized session-expiry recovery for the whole operation. Fail on missing/mismatched details or invalid base64; never silently fall back to preview. No partial output is emitted. Detail requests may affect unread state; previous reads cannot be rolled back on a later failure. The returned readDate remains the pre-detail listing snapshot. Message IDs are restricted to safe alphanumeric, underscore and hyphen path segments before detail retrieval.
+
+## Read filters and single-message content
+
+Get Many filters listing metadata locally using readDate (null/absent/empty means unread) before applying the requested result limit. Pagination progress is tracked separately from matching results, so a full page of read messages does not prematurely terminate an unread scan. Full bodies are requested only after selection. During session recovery after unread/full selection, retain the selected IDs: re-filtering the inbox could lose messages already marked read by earlier detail requests. Other scan recovery retains the existing restart behaviour. Get Content takes a validated ID and returns only messageId/content/contentSource; it shares the guarded detail route and one-session-recovery limit.
+
+## Polling contract
+
+LibrusTrigger implements IPollFunctions with polling:true; n8n injects Poll Times. Automatic polls scan the whole inbox across all read statuses. The first complete scan records a silent baseline. Subsequent complete scans emit unseen IDs and retain a union of up to 10000 IDs; reaching capacity or encountering invalid state fails without mutating history. A SHA-256 account fingerprint uses credential ID and username, not password, so password rotation does not replay messages. Changing account establishes a new baseline. Manual mode retrieves a single preview sample and never accesses static data.
+
+State comparison and assignment occur after the asynchronous scan, with no await between them. This avoids duplicate emission for overlapping calls sharing the same state object. It does not provide distributed locking for stale copies or multi-instance executions. The cursor advances before downstream delivery; a failed downstream action must be recovered through execution retry, not another poll. IDs of messages moved out of the inbox remain in history. This is discovery deduplication, not a transactional outbox or an exactly-once guarantee.
+
+Verified installed n8n 2.37.10 code: n8n-core/dist/nodes-loader/directory-loader.js injects commonPollingParameters; active-workflow-triggers.js runs an activation poll; n8n/dist/workflows/triggers/workflow-trigger-activator.js saves static data after registration. workflow-execution.service.js and poll-cursor.service.js commit a durable cursor with the execution before downstream processing where durable scheduling is enabled. Legacy and durable behaviour depends on host configuration; no host-internal APIs are imported by this package.
+
+Public Librus frontend research (2026-09-07): https://wiadomosci.librus.pl/nowy/inbox serves App-DRe0BPBk.js under /nowy/assets/. Its UI includes an unreadOnly filter, a GET inbox detail route and unread counts, but the inspected code exposes no mark-unread action. Only protocol observations were used; no frontend implementation was copied. Local filtering uses the listing contract already exercised by the client rather than relying on another unverified server query parameter.

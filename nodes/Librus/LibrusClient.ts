@@ -18,12 +18,14 @@ export interface Login {
 	password: string;
 }
 export type ContentSource = 'preview' | 'full';
+export type ReadStatus = 'all' | 'unread' | 'read';
 export interface Scan {
 	returnAll: boolean;
 	limit: number;
 	maxPages: number;
 	includeContent: boolean;
 	contentSource?: ContentSource;
+	readStatus?: ReadStatus;
 }
 export interface Message {
 	messageId: string;
@@ -55,6 +57,10 @@ const messages: Record<string, string> = {
 	FULL_CONTENT_LIMIT:
 		'Full message content is limited to 50 messages per execution. Turn off Return All and set Limit to 50 or less.',
 	INVALID_OPTIONS: 'Invalid Librus credentials or scan options.',
+	TRIGGER_STATE_INVALID:
+		'The saved Librus trigger state is invalid. Recreate the trigger to establish a new inbox baseline.',
+	TRIGGER_STATE_LIMIT:
+		'The Librus trigger has reached its 10000-message history limit. Recreate the trigger to establish a new inbox baseline.',
 };
 type AuthStage =
 	| 'login entry'
@@ -352,6 +358,8 @@ export class LibrusClient {
 			!Number.isInteger(options.maxPages) ||
 			options.maxPages < 1 ||
 			options.maxPages > 50 ||
+			(options.readStatus !== undefined &&
+				!['all', 'unread', 'read'].includes(options.readStatus)) ||
 			(options.contentSource !== undefined &&
 				options.contentSource !== 'preview' &&
 				options.contentSource !== 'full')
@@ -360,17 +368,45 @@ export class LibrusClient {
 		this.deadline = Date.now() + 120000;
 		this.requests = 0;
 		await this.authenticate();
+		let unreadSelection: Message[] | undefined;
 		for (let attempt = 0; attempt < 2; attempt++) {
 			try {
-				const result = await this.scan(options);
+				// Detail reads can change the unread filter. Keep its completed selection on session recovery.
+				const result = unreadSelection ?? (await this.scan(options));
 				if (options.includeContent && options.contentSource === 'full') {
 					if (result.length > 50) throw new LibrusError('FULL_CONTENT_LIMIT');
+					if (options.readStatus === 'unread') unreadSelection = result;
 					for (const message of result) {
 						message.content = await this.fullContent(message.messageId);
 						message.contentSource = 'full';
 					}
 				}
 				return result;
+			} catch (error) {
+				if (!(error instanceof LibrusError) || error.code !== 'SESSION_EXPIRED' || attempt === 1)
+					throw error;
+				await this.authenticate();
+			}
+		}
+		throw new LibrusError('SESSION_EXPIRED');
+	}
+
+	async getMessageContent(
+		messageId: string,
+	): Promise<{ messageId: string; content: string; contentSource: 'full' }> {
+		if (
+			!this.login.username ||
+			!this.login.password ||
+			typeof messageId !== 'string' ||
+			!/^[A-Za-z0-9_-]+$/.test(messageId)
+		)
+			throw new LibrusError('INVALID_OPTIONS');
+		this.deadline = Date.now() + 120000;
+		this.requests = 0;
+		await this.authenticate();
+		for (let attempt = 0; attempt < 2; attempt++) {
+			try {
+				return { messageId, content: await this.fullContent(messageId), contentSource: 'full' };
 			} catch (error) {
 				if (!(error instanceof LibrusError) || error.code !== 'SESSION_EXPIRED' || attempt === 1)
 					throw error;
@@ -395,8 +431,12 @@ export class LibrusClient {
 	}
 
 	private async scan(options: Scan): Promise<Message[]> {
-		const pageSize = options.returnAll ? 50 : Math.min(50, options.limit);
+		const pageSize =
+			options.returnAll || (options.readStatus && options.readStatus !== 'all')
+				? 50
+				: Math.min(50, options.limit);
 		const found = new Map<string, Message>();
+		const scanned = new Set<string>();
 		for (let page = 1; page <= options.maxPages; page++) {
 			const response = await this.request(
 				`https://wiadomosci.librus.pl/api/inbox/messages?page=${page}&limit=${pageSize}`,
@@ -411,18 +451,25 @@ export class LibrusClient {
 			const payload = parseJson(response.body);
 			if (!object(payload) || !Array.isArray(payload.data) || payload.data.length > pageSize)
 				throw new LibrusError('PROTOCOL_ERROR');
-			const before = found.size;
+			const before = scanned.size;
 			for (const raw of payload.data) {
 				const message = parseMessage(
 					raw,
 					options.includeContent && options.contentSource !== 'full',
 				);
-				found.set(message.messageId, message);
+				scanned.add(message.messageId);
+				const unread = message.readDate === null || message.readDate === '';
+				if (
+					!options.readStatus ||
+					options.readStatus === 'all' ||
+					(options.readStatus === 'unread' ? unread : !unread)
+				)
+					found.set(message.messageId, message);
 			}
 			if (!options.returnAll && found.size >= options.limit)
 				return [...found.values()].slice(0, options.limit);
 			if (payload.data.length === 0) return [...found.values()];
-			if (found.size === before) throw new LibrusError('SCAN_INCOMPLETE');
+			if (scanned.size === before) throw new LibrusError('SCAN_INCOMPLETE');
 			if (payload.data.length < pageSize) return [...found.values()];
 		}
 		throw new LibrusError('SCAN_INCOMPLETE');

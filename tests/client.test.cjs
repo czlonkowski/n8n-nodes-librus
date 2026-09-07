@@ -455,3 +455,108 @@ test('unsafe message IDs never become detail paths', async () => {
 	await assert.rejects(client.getMessages(fullOptions), { code: 'PROTOCOL_ERROR' });
 	assert.equal(calls.length, 9);
 });
+
+test('unread filtering skips full read pages, applies Limit to matches and hydrates only selected IDs', async () => {
+	const readPage = Array.from({ length: 50 }, (_, i) => ({
+		...message(i),
+		readDate: '2026-09-01T10:00:00',
+	}));
+	const { client, calls } = setup([
+		...auth(),
+		ok({ data: readPage }),
+		ok({ data: [message('unread'), message('another')] }),
+		ok({ data: { messageId: 'unread', Message: Buffer.from('Full body').toString('base64') } }),
+	]);
+	const result = await client.getMessages({
+		...options,
+		limit: 1,
+		readStatus: 'unread',
+		includeContent: true,
+		contentSource: 'full',
+	});
+	assert.deepEqual(
+		result.map((m) => m.messageId),
+		['unread'],
+	);
+	assert.equal(result[0].content, 'Full body');
+	assert.match(calls.at(-2).url, /page=2&limit=50$/);
+	assert.match(calls.at(-1).url, /messages\/unread$/);
+});
+test('read filter excludes null and empty read dates; legacy options still return all', async () => {
+	const data = [
+		message(1),
+		{ ...message(2), readDate: '' },
+		{ ...message(3), readDate: '2026-09-01' },
+	];
+	const result = await setup([...auth(), ok({ data })]).client.getMessages({
+		...options,
+		readStatus: 'read',
+	});
+	assert.deepEqual(
+		result.map((m) => m.messageId),
+		['3'],
+	);
+	assert.equal((await setup([...auth(), ok({ data })]).client.getMessages(options)).length, 3);
+});
+test('filtered scans still fail at pagination limits and repeated nonmatching pages', async () => {
+	const data = Array.from({ length: 50 }, (_, i) => ({ ...message(i), readDate: '2026-09-01' }));
+	for (const [replies, maxPages] of [
+		[[...auth(), ok({ data })], 1],
+		[[...auth(), ok({ data }), ok({ data })], 2],
+	]) {
+		await assert.rejects(
+			setup(replies).client.getMessages({ ...options, readStatus: 'unread', maxPages }),
+			{ code: 'SCAN_INCOMPLETE' },
+		);
+	}
+});
+test('unsupported read filter and unsafe Get Content IDs fail before any request', async () => {
+	await assert.rejects(setup([]).client.getMessages({ ...options, readStatus: 'surprise' }), {
+		code: 'INVALID_OPTIONS',
+	});
+	for (const id of ['', '../1', '1?x=y', undefined])
+		await assert.rejects(setup([]).client.getMessageContent(id), { code: 'INVALID_OPTIONS' });
+});
+test('Get Content uses the exact ID and refreshes an expired session once', async () => {
+	const { client, calls } = setup([
+		...auth(),
+		{ statusCode: 401, headers: {}, body: '' },
+		...auth(),
+		ok({ data: { messageId: 'abc_123', Message: Buffer.from('Pełna treść').toString('base64') } }),
+	]);
+	assert.deepEqual(await client.getMessageContent('abc_123'), {
+		messageId: 'abc_123',
+		content: 'Pełna treść',
+		contentSource: 'full',
+	});
+	assert.equal(calls.filter((c) => c.url.endsWith('/api/inbox/messages/abc_123')).length, 2);
+});
+
+test('unread full-content recovery retains selected IDs even if earlier detail reads changed their status', async () => {
+	const detail = (id) =>
+		ok({ data: { messageId: id, Message: Buffer.from('Body ' + id).toString('base64') } });
+	const { client, calls } = setup([
+		...auth(),
+		ok({ data: [message('a'), message('b')] }),
+		detail('a'),
+		{ statusCode: 401, headers: {}, body: '' },
+		...auth(),
+		detail('a'),
+		detail('b'),
+	]);
+	const result = await client.getMessages({
+		...options,
+		readStatus: 'unread',
+		includeContent: true,
+		contentSource: 'full',
+	});
+	assert.deepEqual(
+		result.map((m) => m.messageId),
+		['a', 'b'],
+	);
+	assert.deepEqual(
+		result.map((m) => m.content),
+		['Body a', 'Body b'],
+	);
+	assert.equal(calls.filter((c) => new URL(c.url).pathname === '/api/inbox/messages').length, 1);
+});

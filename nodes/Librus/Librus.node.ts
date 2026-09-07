@@ -8,7 +8,13 @@ import type {
 	INodeType,
 	INodeTypeDescription,
 } from 'n8n-workflow';
-import { LibrusClient, LibrusError, safeError, type ContentSource } from './LibrusClient';
+import {
+	LibrusClient,
+	LibrusError,
+	safeError,
+	type ContentSource,
+	type ReadStatus,
+} from './LibrusClient';
 import { createTransport, createCredentialTestTransport } from './transport';
 
 export class Librus implements INodeType {
@@ -48,6 +54,12 @@ export class Librus implements INodeType {
 				displayOptions: { show: { resource: ['message'] } },
 				options: [
 					{
+						name: 'Get Content',
+						value: 'getContent',
+						description: 'Get the full body of a message by ID; may mark it as read',
+						action: 'Get message content',
+					},
+					{
 						name: 'Get Many',
 						value: 'getAll',
 						description: 'Get inbox messages',
@@ -57,8 +69,38 @@ export class Librus implements INodeType {
 				default: 'getAll',
 			},
 			{
+				displayName: 'Message ID',
+				name: 'messageId',
+				type: 'string',
+				default: '',
+				required: true,
+				displayOptions: { show: { operation: ['getContent'] } },
+				description: 'Message identifier from Get Many or Librus Trigger',
+			},
+			{
+				displayName: 'Fetching the full message may mark it as read in Librus.',
+				name: 'getContentNotice',
+				type: 'notice',
+				default: '',
+				displayOptions: { show: { operation: ['getContent'] } },
+			},
+			{
+				displayName: 'Read Status',
+				name: 'readStatus',
+				type: 'options',
+				default: 'all',
+				displayOptions: { show: { operation: ['getAll'] } },
+				options: [
+					{ name: 'All', value: 'all' },
+					{ name: 'Unread', value: 'unread' },
+					{ name: 'Read', value: 'read' },
+				],
+				description: 'Filter the inbox before applying Limit or fetching full content',
+			},
+			{
 				displayName: 'Return All',
 				name: 'returnAll',
+				displayOptions: { show: { operation: ['getAll'] } },
 				type: 'boolean',
 				default: false,
 				description: 'Whether to return all results or only up to a given limit',
@@ -69,12 +111,13 @@ export class Librus implements INodeType {
 				type: 'number',
 				default: 50,
 				typeOptions: { minValue: 1, maxValue: 1000 },
-				displayOptions: { show: { returnAll: [false] } },
+				displayOptions: { show: { operation: ['getAll'], returnAll: [false] } },
 				description: 'Max number of results to return',
 			},
 			{
 				displayName: 'Maximum Pages',
 				name: 'maxPages',
+				displayOptions: { show: { operation: ['getAll'] } },
 				type: 'number',
 				default: 20,
 				typeOptions: { minValue: 1, maxValue: 50 },
@@ -84,6 +127,7 @@ export class Librus implements INodeType {
 			{
 				displayName: 'Include Content',
 				name: 'includeContent',
+				displayOptions: { show: { operation: ['getAll'] } },
 				type: 'boolean',
 				default: false,
 				description:
@@ -94,7 +138,7 @@ export class Librus implements INodeType {
 				name: 'contentSource',
 				type: 'options',
 				noDataExpression: true,
-				displayOptions: { show: { includeContent: [true] } },
+				displayOptions: { show: { operation: ['getAll'], includeContent: [true] } },
 				options: [
 					{
 						name: 'Preview',
@@ -117,7 +161,9 @@ export class Librus implements INodeType {
 				name: 'fullContentNotice',
 				type: 'notice',
 				default: '',
-				displayOptions: { show: { includeContent: [true], contentSource: ['full'] } },
+				displayOptions: {
+					show: { operation: ['getAll'], includeContent: [true], contentSource: ['full'] },
+				},
 			},
 		],
 	};
@@ -160,7 +206,9 @@ export class Librus implements INodeType {
 			try {
 				if (
 					this.getNodeParameter('resource', itemIndex) !== 'message' ||
-					this.getNodeParameter('operation', itemIndex) !== 'getAll'
+					!['getAll', 'getContent'].includes(
+						this.getNodeParameter('operation', itemIndex) as string,
+					)
 				)
 					throw new LibrusError('INVALID_OPTIONS');
 				const credentials = await this.getCredentials('librusSessionApi', itemIndex);
@@ -170,9 +218,17 @@ export class Librus implements INodeType {
 					createTransport(this.helpers.httpRequest.bind(this.helpers)),
 					{ username: credentials.username, password: credentials.password },
 				);
+				if (this.getNodeParameter('operation', itemIndex) === 'getContent') {
+					const result = await client.getMessageContent(
+						this.getNodeParameter('messageId', itemIndex) as string,
+					);
+					output.push({ json: { ...result }, pairedItem: { item: itemIndex } });
+					continue;
+				}
 				const returnAll = this.getNodeParameter('returnAll', itemIndex) as boolean;
 				const result = await client.getMessages({
 					returnAll,
+					readStatus: this.getNodeParameter('readStatus', itemIndex, 'all') as ReadStatus,
 					limit: returnAll ? 50 : (this.getNodeParameter('limit', itemIndex) as number),
 					maxPages: this.getNodeParameter('maxPages', itemIndex) as number,
 					includeContent: this.getNodeParameter('includeContent', itemIndex) as boolean,

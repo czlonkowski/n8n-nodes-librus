@@ -2,7 +2,7 @@
 
 # n8n-nodes-librus
 
-Nieoficjalny węzeł społecznościowy n8n do odczytywania wiadomości z dziennika Librus Synergia. Otwarty kod źródłowy, licencja MIT.
+Nieoficjalna paczka węzłów społecznościowych n8n do odczytywania wiadomości z dziennika Librus Synergia. Otwarty kod źródłowy, licencja MIT.
 
 **Projekt jest na etapie eksperymentalnym.** Na rzeczywistym koncie sprawdzono logowanie, pobranie danych jednej wiadomości oraz jej treści z modułu szczegółów. Do zweryfikowania pozostają: zachowanie statusu nieprzeczytanych wiadomości, kompletność treści w różnych typach wiadomości, pobieranie kolejnych stron skrzynki oraz działanie przy cyklicznym uruchamianiu.
 
@@ -10,7 +10,7 @@ Nieoficjalny węzeł społecznościowy n8n do odczytywania wiadomości z dzienni
 
 Operacja **Librus → Message → Get Many** loguje się do Librusa, otwiera sesję modułu wiadomości i zwraca każdą wiadomość jako osobny element danych n8n.
 
-Można pobrać określoną liczbę wiadomości albo całą skrzynkę, strona po stronie. Wynik zawiera identyfikator wiadomości zapisany jako tekst, dane nadawcy, temat, daty w oryginalnym formacie, datę odczytania, informację o załącznikach i tagi. Opcja **Include Content** dołącza treść, a **Content Source** określa jej źródło:
+Można pobrać określoną liczbę wiadomości albo całą skrzynkę, strona po stronie. **Read Status** pozwala wybrać wszystkie (**All**), tylko nieprzeczytane (**Unread**) lub przeczytane (**Read**). Filtr działa na dacie odczytania z listy: brak daty albo pusty tekst oznacza wiadomość nieprzeczytaną. **Limit dotyczy pasujących wiadomości**. Węzeł przegląda metadane kolejnych stron lokalnie, więc znalezienie starszych nieprzeczytanych może wymagać zwiększenia Maximum Pages. Pełną treść pobiera dopiero dla wiadomości wybranych przez filtr i limit. Wynik zawiera identyfikator wiadomości zapisany jako tekst, dane nadawcy, temat, daty w oryginalnym formacie, datę odczytania, informację o załącznikach i tagi. Opcja **Include Content** dołącza treść, a **Content Source** określa jej źródło:
 
 | Content Source | Zawartość pola `content` |
 | --- | --- |
@@ -23,7 +23,9 @@ W obu trybach treść jest dekodowana z base64 do UTF-8, z zachowaniem HTML. Pol
 
 Pobranie szczegółów **może oznaczyć wiadomość jako przeczytaną w Librusie**. Nie sprawdzono jeszcze tego efektu na nieprzeczytanej wiadomości; próbę wykonano na wiadomości już przeczytanej. Wybierz Full Message świadomie, szczególnie w przepływach uruchamianych automatycznie.
 
-Węzeł nie udostępnia operacji wysyłania, usuwania, pobierania załączników ani oznaczania wiadomości jako przeczytane. Nadal trzeba sprawdzić, czy samo pobranie listy przez Librusa zmienia status odczytania.
+**Librus → Message → Get Content** pobiera pełną treść pojedynczej wiadomości po **Message ID** i zwraca `messageId`, `content` oraz `contentSource: "full"`. Można przekazać ID z triggera wyrażeniem `{{ $json.messageId }}`. Metadane pozostają dostępne w danych poprzedniego węzła. Także ta operacja może oznaczyć wiadomość jako przeczytaną.
+
+Paczka nie udostępnia wysyłania, usuwania, pobierania załączników ani osobnych operacji **Mark as Read / Mark as Unread**. W zbadanym interfejsie nowego modułu wiadomości Librusa nie znaleziono operacji przywracania statusu nieprzeczytanej; dlatego nie deklarujemy jej obsługi. Nadal trzeba sprawdzić, czy samo pobranie listy przez Librusa zmienia status odczytania.
 
 Dla każdego elementu wejściowego powstaje nowa sesja oparta na ciasteczkach. Nie ma jeszcze trwałego przechowywania sesji ani obsługi tokena odświeżającego. Jeśli podczas pobierania wiadomości zostanie rozpoznane wygaśnięcie sesji, węzeł może zalogować się ponownie jeden raz. Błędne dane logowania, brak dostępu, ograniczenie liczby żądań i błędy serwera nie uruchamiają pętli logowania.
 
@@ -79,21 +81,29 @@ Parametr **Maximum Pages** domyślnie wynosi 20, a jego maksymalna wartość to 
 
 Tryb **Full Message** obsługuje do **50 wiadomości na wykonanie**. Szczegóły są pobierane kolejno, w tej samej sesji, dopiero po zakończeniu pobierania listy, zastosowaniu limitu i usunięciu duplikatów identyfikatorów. Jeśli wynik zawiera więcej niż 50 wiadomości, węzeł zgłosi `FULL_CONTENT_LIMIT` przed pobraniem szczegółów. Wyłącz wtedy Return All i ustaw Limit na 50 lub mniej.
 
-Błąd pobrania szczegółów zatrzymuje wykonanie — węzeł nie zastępuje brakującej pełnej treści skrótem. Nie zwraca też częściowego wyniku, choć wcześniejsze żądania szczegółów mogły już wpłynąć na status odczytania w Librusie. Pole `readDate` pochodzi z listy pobranej przed odczytem szczegółów.
+Błąd pobrania szczegółów zatrzymuje wykonanie — węzeł nie zastępuje brakującej pełnej treści skrótem. Nie zwraca też częściowego wyniku, choć wcześniejsze żądania szczegółów mogły już wpłynąć na status odczytania w Librusie. Pole `readDate` pochodzi z listy pobranej przed odczytem szczegółów. Przy filtrze Unread i odnowieniu wygasłej sesji zachowywany jest już wybrany zestaw identyfikatorów, aby wcześniejszy odczyt szczegółów nie usunął ich z bieżącego wyniku.
 
-Po włączeniu **Include Content** treść wiadomości trafia do zwykłych danych wykonania n8n. Jej przechowywanie zależy od ustawień zapisywania i usuwania historii wykonań. Jeśli wyświetlasz zwrócony HTML w innej aplikacji, potraktuj go jako niezaufaną treść.
+Po włączeniu **Include Content** treść wiadomości trafia do zwykłych danych wykonania n8n. Jej przechowywanie zależy od ustawień zapisywania i usuwania historii wykonań. Podgląd dołączany przez trigger i treść z Get Content również trafiają do danych wykonania. Jeśli wyświetlasz zwrócony HTML w innej aplikacji, potraktuj go jako niezaufaną treść.
 
-## Powiadomienia — kolejny etap
+## Librus Trigger — nowa wiadomość
 
-Po zakończeniu testów na rzeczywistym koncie można zbudować przepływ:
+Osobny węzeł **Librus Trigger** cyklicznie sprawdza skrzynkę i uruchamia przepływ dla nowych identyfikatorów `messageId`. Jest to odpytywanie Librusa według harmonogramu; opóźnienie zależy od **Poll Times**.
 
-`Schedule Trigger → Librus → sprawdzenie zapisanych identyfikatorów → wysłanie powiadomienia`
+1. Dodaj **Librus Trigger**, wybierz zapisane dane **Librus Session API** i zdarzenie **New Message**.
+2. Ustaw **Poll Times** na **Every X → 5 → Minutes** lub rzadziej. n8n domyślnie ustawia minutę, więc zmień ten parametr. Bezpieczna częstotliwość dla Librusa nadal wymaga sprawdzenia.
+3. Użyj ręcznego testu triggera: zwróci jedną bieżącą wiadomość jako próbkę, niezależnie od jej wieku i statusu. Pusta skrzynka nie zwróci próbki. Test nie zmienia historii wykrytych wiadomości.
+4. Połącz kolejne kroki i zapisz przepływ. Przykład: **Librus Trigger → Librus (Get Content, Message ID: `{{ $json.messageId }}`) → wybrany kanał powiadomień**. Do powiadomienia z samym tematem i podglądem wystarczy bezpośrednie wyjście triggera.
+5. Po opublikowaniu/aktywacji przepływu pierwsze automatyczne sprawdzenie zapamięta całą obecną skrzynkę i nie uruchomi dalszych kroków. Dopiero kolejne sprawdzenia zwrócą nowe wiadomości. Zwykłe zapisanie nieaktywnego workflow nie uruchamia harmonogramu.
 
-Zapamiętuj identyfikatory `messageId` osobno dla każdego konta. Pierwsze pobranie powinno ustalić stan początkowy, żeby nie wysłać powiadomień o całej dotychczasowej skrzynce. Zapisuj udane dostarczenie po wysłaniu powiadomienia. Jeśli zależy Ci na unikaniu duplikatów także przy ponowieniach po błędzie, dodaj trwałą kolejkę wysyłki i mechanizm rozpoznawania wcześniej dostarczonych powiadomień.
+Trigger sprawdza zarówno przeczytane, jak i nieprzeczytane wiadomości. Wiadomość odczytana w aplikacji przed kolejnym sprawdzeniem nadal zostanie wykryta. Zmiana statusu starej wiadomości nie jest nowym zdarzeniem. **Include Preview** domyślnie dołącza skróconą treść; trigger nie pobiera szczegółów wiadomości. Możesz wyłączyć podgląd i otrzymywać same metadane.
 
-Nie wykrywaj nowych wiadomości wyłącznie na podstawie liczby nieprzeczytanych. Przekazany dalej e-mail z Librusa może uruchomić dodatkowe sprawdzenie skrzynki, ale ogólne powiadomienie o nieprzeczytanej wiadomości nie gwarantuje osobnego sygnału dla każdej nowej wiadomości.
+Stan triggera jest przechowywany przez n8n osobno dla węzła: wersja formatu, skrót identyfikujący konto i identyfikatory wykrytych wiadomości. Nie zawiera hasła, ciasteczek ani treści. Przy zachowaniu tego stanu restart nie odtwarza historii. Zmiana konta lub utworzenie nowego triggera ustala nowy stan początkowy. Utrata bazy n8n oznacza utratę tej historii.
 
-Paczka nie zawiera jeszcze wyzwalacza cyklicznego i sama nie uruchamia automatycznych przepływów. Przed pracą bez nadzoru trzeba sprawdzić częstotliwość odpytywania, ponowne używanie sesji, obsługę wielu kont, kompletność treści i zachowanie statusu odczytania.
+Każde automatyczne sprawdzenie musi ukończyć przegląd całej skrzynki w granicach **Maximum Pages** (domyślnie 20, maksymalnie 50), 100 żądań i 120 sekund. Niepełny skan kończy się błędem i nie zmienia historii. Historia mieści do **10 000 identyfikatorów**; po przekroczeniu limitu pojawi się błąd. Utworzenie nowego triggera rozpocznie historię od aktualnej skrzynki bez odtwarzania starych zdarzeń. Wiadomość usunięta lub przeniesiona poza skrzynkę pomiędzy sprawdzeniami może pozostać niewykryta.
+
+**Błąd dalszego kroku nie cofa historii triggera.** Jeżeli np. wysyłka powiadomienia się nie powiedzie, ponów nieudane wykonanie w n8n. Samo następne sprawdzenie nie wyśle tej wiadomości ponownie. Przy równoległych wykonaniach lub wielu instancjach możliwe są duplikaty. Gdy potrzebujesz gwarancji dostarczenia i deduplikacji także przy awariach, zapisuj zdarzenia w trwałej kolejce z kluczem konto + `messageId` i osobno potwierdzaj udaną wysyłkę.
+
+Testy automatyczne obejmują stan początkowy, restart, zmianę statusu, błędy skanowania i równoległe sprawdzenia. Działanie harmonogramu na rzeczywistym koncie, skutki ponownego logowania i zachowanie statusu odczytania wymagają jeszcze próby. Paczka nie aktywuje workflow automatycznie.
 
 ## Zgłaszanie błędów i rozwój
 

@@ -14,3 +14,8 @@
 - Upgrade legacy HTTP redirects to HTTPS for exact trusted Librus hosts before sending any request.
 - Add explicit Preview / Full Message content selection and identify the selected source in output.
 - Fetch full message bodies after list selection, with a 50-message cap and strict detail validation.
+- Add All / Unread / Read filtering before result limits and full-content requests.
+- Add Get Content by message ID with bounded authentication recovery.
+- Add Librus Trigger with silent initial baseline, manual sample, account-scoped bounded ID history and preview-only polling.
+- Preserve unread selections during full-body session recovery to avoid dropping messages whose detail reads changed their status.
+- Document polling, cursor persistence, downstream retry semantics and unsupported mark-unread operations in Polish.

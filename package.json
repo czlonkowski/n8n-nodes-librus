@@ -39,7 +39,8 @@
       "dist/credentials/LibrusSessionApi.credentials.js"
     ],
     "nodes": [
-      "dist/nodes/Librus/Librus.node.js"
+      "dist/nodes/Librus/Librus.node.js",
+      "dist/nodes/Librus/LibrusTrigger.node.js"
     ]
   },
   "devDependencies": {

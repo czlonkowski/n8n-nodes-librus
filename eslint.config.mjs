@@ -3,7 +3,7 @@ import { configWithoutCloudSupport } from '@n8n/node-cli/eslint';
 export default [
 	...configWithoutCloudSupport,
 	{
-		files: ['nodes/Librus/Librus.node.ts'],
+		files: ['nodes/Librus/Librus.node.ts', 'nodes/Librus/LibrusTrigger.node.ts'],
 		rules: {
 			// Internal sanitized errors are converted at the n8n boundary.
 			'n8n-nodes-base/node-execute-block-wrong-error-thrown': 'off',
@@ -18,7 +18,7 @@ export default [
 		},
 	},
 	{
-		files: ['nodes/Librus/LibrusClient.ts'],
+		files: ['nodes/Librus/LibrusClient.ts', 'nodes/Librus/pollState.ts'],
 		rules: {
 			// Framework-independent client: only safe errors cross into the node adapter.
 			'@n8n/community-nodes/require-node-api-error': 'off',

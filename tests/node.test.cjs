@@ -116,3 +116,37 @@ test('credential test uses its supported legacy helper and sanitizes errors', as
 	assert.match(result.message, /TRANSPORT_ERROR/);
 	assert.doesNotMatch(result.message, /secret-password/);
 });
+
+test('Get Content dispatches each input ID and pairs output without reading list-only options', async (t) => {
+	const { LibrusClient } = require('../dist/nodes/Librus/LibrusClient');
+	const ids = [];
+	t.mock.method(LibrusClient.prototype, 'getMessageContent', async (id) => {
+		ids.push(id);
+		return { messageId: id, content: 'Synthetic full body', contentSource: 'full' };
+	});
+	const ctx = context(false);
+	ctx.getNodeParameter = (name, index) => {
+		if (name === 'resource') return 'message';
+		if (name === 'operation') return 'getContent';
+		if (name === 'messageId') return `synthetic-${index}`;
+		throw Error('Unexpected list-only parameter');
+	};
+	const result = await new Librus().execute.call(ctx);
+	assert.deepEqual(ids, ['synthetic-0', 'synthetic-1']);
+	assert.deepEqual(
+		result[0].map((item) => item.pairedItem),
+		[{ item: 0 }, { item: 1 }],
+	);
+});
+test('Get Many passes the selected read filter to the client', async (t) => {
+	const { LibrusClient } = require('../dist/nodes/Librus/LibrusClient');
+	t.mock.method(LibrusClient.prototype, 'getMessages', async (options) => {
+		assert.equal(options.readStatus, 'unread');
+		return [];
+	});
+	const ctx = context(false);
+	const parameters = ctx.getNodeParameter;
+	ctx.getNodeParameter = (name, index) =>
+		name === 'readStatus' ? 'unread' : parameters(name, index);
+	assert.deepEqual(await new Librus().execute.call(ctx), [[]]);
+});
