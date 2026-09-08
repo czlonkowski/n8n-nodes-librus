@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.5 — 2026-09-08
+
+- Add the author’s standard AiAdvisors automation services CTA in Polish to the README.
+
 ## 0.1.4 — 2026-09-08
 
 - Describe both message retrieval and new-message detection on the shared Librus card in n8n.

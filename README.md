@@ -6,6 +6,8 @@ Pobieraj wiadomości z Librus Synergia i uruchamiaj automatyzacje po otrzymaniu 
 
 To nieoficjalna, eksperymentalna integracja do **samodzielnie hostowanego n8n**. Nie jest dostępna w n8n Cloud. Instancja n8n musi korzystać z Node.js 24 lub nowszego.
 
+> 💼 **Chcesz zlecić budowę automatyzacji?** Zleć audyt, budowę lub utrzymanie automatyzacji n8n firmie [AiAdvisors](https://aiadvisors.pl), prowadzonej przez autora n8n-mcp i n8n-skills.
+
 ## Instalacja
 
 1. W n8n przejdź do **Settings → Community nodes → Install**.

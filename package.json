@@ -1,6 +1,6 @@
 {
   "name": "@czlonkowski/n8n-nodes-librus",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Dwa węzły n8n do pobierania wiadomości z Librus Synergia i uruchamiania automatyzacji po otrzymaniu nowych.",
   "license": "MIT",
   "keywords": [
