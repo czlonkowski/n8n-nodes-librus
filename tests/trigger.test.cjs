@@ -234,3 +234,59 @@ test('activation preserves history and surfaces safe diagnostics for invalid lat
 	assert.equal(replies.length, 0);
 	assert.equal(JSON.stringify(state), before);
 });
+
+test('automatic polling baselines a tagged 19th message and emits a new tagged message once', async () => {
+	const raw = (id, tags = []) => ({
+		messageId: String(id),
+		senderFirstName: 'Synthetic',
+		senderLastName: 'Sender',
+		senderName: 'Synthetic Sender',
+		topic: 'Synthetic',
+		sendDate: '2026-09-08',
+		readDate: null,
+		category: null,
+		isAnyFileAttached: false,
+		tags,
+	});
+	let inbox = Array.from({ length: 19 }, (_, i) => raw(i, i === 18 ? [{ id: 17 }] : []));
+	const ok = (body = '') => ({
+		statusCode: 200,
+		headers: {},
+		body: typeof body === 'string' ? body : JSON.stringify(body),
+	});
+	const redirect = (location) => ({ statusCode: 302, headers: { location }, body: '' });
+	const replies = () => [
+		redirect('https://api.librus.pl/OAuth/Authorization?client_id=46'),
+		ok('<form></form>'),
+		ok({ goTo: '/OAuth/Authorization/2FA' }),
+		redirect('https://synergia.librus.pl/rodzic/index'),
+		ok(),
+		ok('{}'),
+		redirect('https://wiadomosci.librus.pl/nowy/inbox'),
+		ok(),
+		ok({ data: inbox }),
+	];
+	let pending = replies();
+	const state = {};
+	const ctx = context(state);
+	const parameters = ctx.getNodeParameter;
+	ctx.getNodeParameter = (name) => (name === 'includePreview' ? false : parameters(name));
+	ctx.helpers.httpRequest = async () => {
+		assert.ok(pending.length, 'Unexpected request');
+		return pending.shift();
+	};
+	const trigger = new LibrusTrigger();
+	assert.equal(await trigger.poll.call(ctx), null);
+	assert.equal(pending.length, 0);
+	assert.equal(state.librus.seenIds.length, 19);
+	inbox = [raw('new', [{ id: '0021', extra: 'PRIVATE-EXTRA' }]), ...inbox];
+	pending = replies();
+	const result = await trigger.poll.call(ctx);
+	assert.equal(result[0].length, 1);
+	assert.equal(result[0][0].json.messageId, 'new');
+	assert.deepEqual(result[0][0].json.tags, ['0021']);
+	assert.doesNotMatch(JSON.stringify(result), /PRIVATE-EXTRA/);
+	pending = replies();
+	assert.equal(await trigger.poll.call(ctx), null);
+	assert.equal(pending.length, 0);
+});

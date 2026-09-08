@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.3 — 2026-09-08
+
+- Fix full inbox scans and trigger activation failing on tagged messages: accept Librus tag objects with an id field and normalize IDs to the existing string-array output.
+- Preserve string tags and reject malformed tag objects or unsafe numeric IDs; never copy additional object properties to output.
+- Add regression coverage for tagged messages beyond the manual sample and automatic trigger baseline/new-message detection.
+
 ## 0.1.2 — 2026-09-08
 
 - Diagnose protocol failures with fixed validation labels, primitive type names and inbox page/item positions, without response values, message IDs or credentials.

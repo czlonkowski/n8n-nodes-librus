@@ -223,6 +223,20 @@ function decodeContent(value: unknown): string {
 		throw protocolError('UTF-8 content', value);
 	}
 }
+// The Librus web UI reads message tags as objects with an id field.
+// Preserve our string-array output and copy only IDs, never arbitrary tag properties.
+function parseTags(value: unknown): string[] {
+	if (!Array.isArray(value)) throw protocolError('message.tags', value);
+	return value.map((tag: unknown) => {
+		if (typeof tag === 'string') return tag;
+		if (object(tag)) {
+			if (typeof tag.id === 'string' && tag.id) return tag.id;
+			if (typeof tag.id === 'number' && Number.isSafeInteger(tag.id) && tag.id >= 0)
+				return String(tag.id);
+		}
+		throw protocolError('message.tags', tag);
+	});
+}
 function parseMessage(value: unknown, includeContent: boolean): Message {
 	if (!object(value)) throw protocolError('message object', value);
 	const strings = [
@@ -246,12 +260,8 @@ function parseMessage(value: unknown, includeContent: boolean): Message {
 	}
 	if (typeof value.isAnyFileAttached !== 'boolean')
 		throw protocolError('message.isAnyFileAttached', value.isAnyFileAttached);
-	if (!Array.isArray(value.tags)) throw protocolError('message.tags', value.tags);
-	for (const tag of value.tags) {
-		if (typeof tag !== 'string') throw protocolError('message.tags', tag);
-	}
 	result.isAnyFileAttached = value.isAnyFileAttached;
-	result.tags = value.tags as string[];
+	result.tags = parseTags(value.tags);
 	if (includeContent) {
 		result.content = decodeContent(value.content);
 		result.contentSource = 'preview';

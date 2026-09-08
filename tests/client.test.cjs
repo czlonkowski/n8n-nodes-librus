@@ -663,3 +663,52 @@ test('protocol errors during authentication are identified without raw response 
 		},
 	);
 });
+
+test('Librus tag objects normalize to string IDs without copying unrelated properties', async () => {
+	const tags = [
+		'legacy-tag',
+		{ id: 17, extra: 'PRIVATE-EXTRA' },
+		{ id: '0018' },
+		{ id: '90071992547409931234' },
+	];
+	const records = Array.from({ length: 19 }, (_, i) => ({
+		...message(i),
+		tags: i === 18 ? tags : [],
+	}));
+	const result = await setup([...auth(), ok({ data: records })]).client.getMessages({
+		...options,
+		returnAll: true,
+		includeContent: true,
+	});
+	assert.equal(result.length, 19);
+	assert.deepEqual(result[18].tags, ['legacy-tag', '17', '0018', '90071992547409931234']);
+	assert.deepEqual(result[0].tags, []);
+	assert.doesNotMatch(JSON.stringify(result), /PRIVATE-EXTRA/);
+});
+for (const tag of [
+	{},
+	{ id: null },
+	{ id: '' },
+	{ id: true },
+	{ id: [] },
+	{ id: {} },
+	{ id: -1 },
+	{ id: 1.5 },
+	{ id: Number.MAX_SAFE_INTEGER + 1 },
+	null,
+	17,
+	[],
+]) {
+	test(`malformed tag remains a protocol error (${JSON.stringify(tag)})`, async () => {
+		await assert.rejects(
+			setup([...auth(), ok({ data: [{ ...message(1), tags: [tag] }] })]).client.getMessages(
+				options,
+			),
+			(error) => {
+				assert.equal(error.code, 'PROTOCOL_ERROR');
+				assert.match(error.message, /Check: message.tags/);
+				return true;
+			},
+		);
+	});
+}
