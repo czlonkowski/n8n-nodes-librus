@@ -43,37 +43,39 @@ export interface Message {
 }
 
 const messages: Record<string, string> = {
-	UNSAFE_URL: 'Librus returned an unexpected destination. No request was sent to it.',
-	TRANSPORT_ERROR: 'The Librus request failed. Check connectivity and try again later.',
-	PROTOCOL_ERROR: 'Librus returned an unexpected response. The integration may need updating.',
-	AUTH_FAILED: 'Librus login was not accepted. Check your credentials in the Librus website.',
-	ACTION_REQUIRED: 'Complete any login verification or account prompts in the Librus website.',
-	SESSION_EXPIRED: 'The Librus session expired during the request.',
-	RATE_LIMITED: 'Librus is limiting requests. Wait before trying again.',
-	ACCESS_DENIED: 'Librus denied this request. Check account access in the website.',
-	SERVICE_ERROR: 'Librus is unavailable or returned an unexpected HTTP status.',
+	UNSAFE_URL: 'Librus wskazał niedozwolony adres. Nie wysłano do niego zapytania.',
+	TRANSPORT_ERROR:
+		'Nie udało się połączyć z Librusem. Sprawdź połączenie i spróbuj ponownie później.',
+	PROTOCOL_ERROR:
+		'Librus zwrócił odpowiedź w nieoczekiwanym formacie. Integracja może wymagać aktualizacji.',
+	AUTH_FAILED: 'Librus odrzucił logowanie. Sprawdź login i hasło na stronie Librusa.',
+	ACTION_REQUIRED: 'Zaloguj się na stronie Librusa i uzupełnij wymagane potwierdzenia konta.',
+	SESSION_EXPIRED: 'Sesja Librusa wygasła podczas zapytania.',
+	RATE_LIMITED: 'Librus ogranicza liczbę zapytań. Odczekaj przed kolejną próbą.',
+	ACCESS_DENIED: 'Librus odmówił dostępu. Sprawdź uprawnienia konta na stronie Librusa.',
+	SERVICE_ERROR: 'Librus jest niedostępny lub zwrócił nieoczekiwany status HTTP.',
 	SCAN_INCOMPLETE:
-		'The inbox scan could not finish within its safety limits. Increase Maximum Pages or use a bounded Limit.',
+		'Nie udało się sprawdzić całej skrzynki w wyznaczonych granicach. Zwiększ Maksymalną liczbę stron lub ogranicz liczbę pobieranych wiadomości.',
 	FULL_CONTENT_LIMIT:
-		'Full message content is limited to 50 messages per execution. Turn off Return All and set Limit to 50 or less.',
-	INVALID_OPTIONS: 'Invalid Librus credentials or scan options.',
+		'W jednym wykonaniu można pobrać pełną treść maksymalnie 50 wiadomości. Wyłącz Pobierz wszystkie i ustaw Limit na 50 lub mniej.',
+	INVALID_OPTIONS: 'Nieprawidłowe dane logowania do Librusa lub ustawienia pobierania wiadomości.',
 	TRIGGER_STATE_INVALID:
-		'The saved Librus trigger state is invalid. Recreate the trigger to establish a new inbox baseline.',
+		'Zapisana historia wykrytych wiadomości jest nieprawidłowa. Utwórz ponownie węzeł Nowa wiadomość, aby zapamiętać aktualną skrzynkę.',
 	TRIGGER_STATE_LIMIT:
-		'The Librus trigger has reached its 10000-message history limit. Recreate the trigger to establish a new inbox baseline.',
+		'Osiągnięto limit historii 10 000 wiadomości. Utwórz ponownie węzeł Nowa wiadomość, aby zapamiętać aktualną skrzynkę.',
 };
 type AuthStage =
-	| 'login entry'
-	| 'credential submission'
-	| 'authorization continuation'
-	| 'messages initialization';
+	| 'rozpoczęcie logowania'
+	| 'przesłanie danych logowania'
+	| 'kontynuacja autoryzacji'
+	| 'otwarcie skrzynki';
 type AuthDestination =
-	| 'OAuth authorization'
-	| 'Synergia OAuth callback'
-	| 'Synergia login'
-	| 'Synergia page'
-	| 'messages service'
-	| 'other allowed page';
+	| 'autoryzacja OAuth'
+	| 'powrót OAuth do Synergii'
+	| 'logowanie do Synergii'
+	| 'strona Synergii'
+	| 'serwis wiadomości'
+	| 'inna dozwolona strona';
 
 export class LibrusError extends Error {
 	constructor(
@@ -81,15 +83,15 @@ export class LibrusError extends Error {
 		stage?: AuthStage,
 		destination?: AuthDestination,
 		rejection?:
-			| 'non-HTTPS destination'
-			| 'URL credentials'
-			| 'non-default port'
-			| 'unrecognized hostname',
+			| 'adres bez HTTPS'
+			| 'dane logowania w adresie URL'
+			| 'niestandardowy port'
+			| 'nierozpoznana domena',
 	) {
 		super(
 			(messages[code] ?? messages.PROTOCOL_ERROR) +
-				(stage ? ` [Step: ${stage}; page: ${destination}]` : '') +
-				(rejection ? ` [Redirect rejected: ${rejection}]` : ''),
+				(stage ? ` [Etap: ${stage}; strona: ${destination}]` : '') +
+				(rejection ? ` [Odrzucone przekierowanie: ${rejection}]` : ''),
 		);
 	}
 }
@@ -99,25 +101,25 @@ export function safeError(error: unknown): LibrusError {
 // Diagnostics contain only code-owned labels and primitive type names, never values.
 type ProtocolCheck =
 	| `message.${keyof Message}`
-	| 'message object'
-	| 'JSON response'
-	| 'HTML instead of JSON'
-	| 'base64 content'
-	| 'UTF-8 content'
-	| 'HTTP body type'
-	| 'HTTP body size'
-	| 'response cookie'
-	| 'POST redirect'
-	| 'redirect location'
-	| 'redirect limit'
-	| 'inbox destination'
-	| 'inbox response object'
-	| 'inbox data array'
-	| 'inbox page size';
+	| 'obiekt wiadomości'
+	| 'odpowiedź JSON'
+	| 'HTML zamiast JSON'
+	| 'treść base64'
+	| 'treść UTF-8'
+	| 'typ treści odpowiedzi HTTP'
+	| 'rozmiar odpowiedzi HTTP'
+	| 'ciasteczko odpowiedzi'
+	| 'przekierowanie POST'
+	| 'adres przekierowania'
+	| 'limit przekierowań'
+	| 'adres skrzynki'
+	| 'obiekt odpowiedzi skrzynki'
+	| 'tablica wiadomości'
+	| 'liczba wiadomości na stronie';
 function protocolError(check: ProtocolCheck, value?: unknown): LibrusError {
 	const type = value === null ? 'null' : Array.isArray(value) ? 'array' : typeof value;
 	const error = new LibrusError('PROTOCOL_ERROR');
-	error.message += ` [Check: ${check}; received type: ${type}]`;
+	error.message += ` [Walidacja: ${check}; otrzymany typ: ${type}]`;
 	return error;
 }
 const allowedHosts = new Set([
@@ -142,12 +144,12 @@ function checkedUrl(value: string, base?: string): URL {
 	) {
 		const rejection =
 			url.protocol !== 'https:'
-				? 'non-HTTPS destination'
+				? 'adres bez HTTPS'
 				: url.username || url.password
-					? 'URL credentials'
+					? 'dane logowania w adresie URL'
 					: url.port
-						? 'non-default port'
-						: 'unrecognized hostname';
+						? 'niestandardowy port'
+						: 'nierozpoznana domena';
 		throw new LibrusError('UNSAFE_URL', undefined, undefined, rejection);
 	}
 	return url;
@@ -176,16 +178,16 @@ function authUrl(url: URL): boolean {
 }
 function actionRequired(stage: AuthStage, url: URL): LibrusError {
 	const destination: AuthDestination = authUrl(url)
-		? 'OAuth authorization'
+		? 'autoryzacja OAuth'
 		: url.hostname === 'synergia.librus.pl' && url.pathname === '/loguj/portalRodzina'
-			? 'Synergia OAuth callback'
+			? 'powrót OAuth do Synergii'
 			: url.hostname === 'synergia.librus.pl' && /^\/loguj(?:\/|$)/.test(url.pathname)
-				? 'Synergia login'
+				? 'logowanie do Synergii'
 				: url.hostname === 'synergia.librus.pl'
-					? 'Synergia page'
+					? 'strona Synergii'
 					: url.hostname === 'wiadomosci.librus.pl'
-						? 'messages service'
-						: 'other allowed page';
+						? 'serwis wiadomości'
+						: 'inna dozwolona strona';
 	return new LibrusError('ACTION_REQUIRED', stage, destination);
 }
 function object(value: unknown): value is Record<string, unknown> {
@@ -195,7 +197,7 @@ function parseJson(body: string): unknown {
 	try {
 		return JSON.parse(body);
 	} catch {
-		throw protocolError(isHtml(body) ? 'HTML instead of JSON' : 'JSON response', body);
+		throw protocolError(isHtml(body) ? 'HTML zamiast JSON' : 'odpowiedź JSON', body);
 	}
 }
 function isHtml(body: string): boolean {
@@ -215,12 +217,12 @@ function decodeContent(value: unknown): string {
 		typeof value !== 'string' ||
 		!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value)
 	) {
-		throw protocolError('base64 content', value);
+		throw protocolError('treść base64', value);
 	}
 	try {
 		return new TextDecoder('utf-8', { fatal: true }).decode(Buffer.from(value, 'base64'));
 	} catch {
-		throw protocolError('UTF-8 content', value);
+		throw protocolError('treść UTF-8', value);
 	}
 }
 // The Librus web UI reads message tags as objects with an id field.
@@ -238,7 +240,7 @@ function parseTags(value: unknown): string[] {
 	});
 }
 function parseMessage(value: unknown, includeContent: boolean): Message {
-	if (!object(value)) throw protocolError('message object', value);
+	if (!object(value)) throw protocolError('obiekt wiadomości', value);
 	const strings = [
 		'messageId',
 		'senderFirstName',
@@ -306,8 +308,9 @@ export class LibrusClient {
 			} catch {
 				throw new LibrusError('TRANSPORT_ERROR');
 			}
-			if (typeof response.body !== 'string') throw protocolError('HTTP body type', response.body);
-			if (response.body.length > 10_000_000) throw protocolError('HTTP body size');
+			if (typeof response.body !== 'string')
+				throw protocolError('typ treści odpowiedzi HTTP', response.body);
+			if (response.body.length > 10_000_000) throw protocolError('rozmiar odpowiedzi HTTP');
 			const normalized = Object.fromEntries(
 				Object.entries(response.headers).map(([key, val]) => [key.toLowerCase(), val]),
 			);
@@ -320,14 +323,14 @@ export class LibrusClient {
 				try {
 					await this.jar.setCookie(entry, url.href);
 				} catch {
-					throw protocolError('response cookie');
+					throw protocolError('ciasteczko odpowiedzi');
 				}
 			}
 			if ([301, 302, 303, 307, 308].includes(response.statusCode)) {
 				// Never replay a credential-bearing POST, including on a same-host redirect.
-				if (body !== undefined) throw protocolError('POST redirect');
+				if (body !== undefined) throw protocolError('przekierowanie POST');
 				const location = normalized.location;
-				if (typeof location !== 'string') throw protocolError('redirect location', location);
+				if (typeof location !== 'string') throw protocolError('adres przekierowania', location);
 				url = checkedRedirect(location, url.href);
 				continue;
 			}
@@ -345,21 +348,22 @@ export class LibrusClient {
 				throw new LibrusError('SERVICE_ERROR');
 			return { ...response, url };
 		}
-		throw protocolError('redirect limit');
+		throw protocolError('limit przekierowań');
 	}
 
 	private async authenticate(): Promise<void> {
 		try {
 			this.jar = new CookieJar();
 			const entry = await this.request('https://synergia.librus.pl/loguj/portalRodzina');
-			if (!authUrl(entry.url)) throw actionRequired('login entry', entry.url);
+			if (!authUrl(entry.url)) throw actionRequired('rozpoczęcie logowania', entry.url);
 			const form = new URLSearchParams({
 				action: 'login',
 				login: this.login.username,
 				pass: this.login.password,
 			});
 			const loginReply = await this.request(entry.url.href, form.toString());
-			if (isHtml(loginReply.body)) throw actionRequired('credential submission', loginReply.url);
+			if (isHtml(loginReply.body))
+				throw actionRequired('przesłanie danych logowania', loginReply.url);
 			const reply = parseJson(loginReply.body);
 			if (!object(reply) || typeof reply.goTo !== 'string' || !reply.goTo)
 				throw new LibrusError('AUTH_FAILED');
@@ -372,14 +376,14 @@ export class LibrusClient {
 					!/^\/loguj\/portalRodzina\/?$/.test(authorized.url.pathname)) ||
 				isLoginForm(authorized.body)
 			)
-				throw actionRequired('authorization continuation', authorized.url);
+				throw actionRequired('kontynuacja autoryzacji', authorized.url);
 			await this.request('https://synergia.librus.pl/gateway/api/2.0/Auth/TokenInfo/');
 			const inbox = await this.request('https://synergia.librus.pl/wiadomosci3');
 			if (authUrl(inbox.url) || /\/loguj(?:\/|$)/.test(inbox.url.pathname))
-				throw actionRequired('messages initialization', inbox.url);
+				throw actionRequired('otwarcie skrzynki', inbox.url);
 		} catch (error) {
 			if (error instanceof LibrusError && error.code === 'PROTOCOL_ERROR')
-				error.message += ' [Phase: authentication]';
+				error.message += ' [Faza: logowanie]';
 			throw error;
 		}
 	}
@@ -485,11 +489,12 @@ export class LibrusClient {
 					response.url.hostname !== 'wiadomosci.librus.pl' ||
 					response.url.pathname !== '/api/inbox/messages'
 				)
-					throw protocolError('inbox destination');
+					throw protocolError('adres skrzynki');
 				const payload = parseJson(response.body);
-				if (!object(payload)) throw protocolError('inbox response object', payload);
-				if (!Array.isArray(payload.data)) throw protocolError('inbox data array', payload.data);
-				if (payload.data.length > pageSize) throw protocolError('inbox page size', payload.data);
+				if (!object(payload)) throw protocolError('obiekt odpowiedzi skrzynki', payload);
+				if (!Array.isArray(payload.data)) throw protocolError('tablica wiadomości', payload.data);
+				if (payload.data.length > pageSize)
+					throw protocolError('liczba wiadomości na stronie', payload.data);
 				const before = scanned.size;
 				for (const [index, raw] of payload.data.entries()) {
 					itemIndex = index + 1;
@@ -513,7 +518,7 @@ export class LibrusClient {
 				if (payload.data.length < pageSize) return [...found.values()];
 			} catch (error) {
 				if (error instanceof LibrusError && error.code === 'PROTOCOL_ERROR') {
-					error.message += ` [Inbox page: ${page}; page size: ${pageSize}${itemIndex === undefined ? '' : `; item: ${itemIndex}`}]`;
+					error.message += ` [Strona skrzynki: ${page}; rozmiar strony: ${pageSize}${itemIndex === undefined ? '' : `; pozycja: ${itemIndex}`}]`;
 				}
 				throw error;
 			}

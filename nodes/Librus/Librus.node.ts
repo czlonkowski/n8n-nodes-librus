@@ -24,8 +24,10 @@ export class Librus implements INodeType {
 		icon: 'file:librus.png',
 		group: ['input'],
 		version: 1,
-		subtitle: '={{$parameter["operation"] + ": " + $parameter["resource"]}}',
-		description: 'Read messages from Librus Synergia',
+		subtitle:
+			'={{$parameter["operation"] === "getContent" ? "Pobierz treść wiadomości" : "Pobierz wiadomości"}}',
+		description:
+			'Pobieraj wiadomości i ich pełną treść z Librus Synergia oraz uruchamiaj workflow po otrzymaniu nowych wiadomości',
 		defaults: { name: 'Librus' },
 		inputs: [NodeConnectionTypes.Main],
 		outputs: [NodeConnectionTypes.Main],
@@ -33,77 +35,79 @@ export class Librus implements INodeType {
 		properties: [
 			{
 				displayName:
-					'Experimental integration using unofficial Librus routes. Live account compatibility and unread-state behaviour still require verification.',
+					'Nieoficjalna integracja z Librus Synergia. Pobranie pełnej treści może oznaczyć wiadomość jako przeczytaną.',
 				name: 'experimentalNotice',
 				type: 'notice',
 				default: '',
 			},
 			{
-				displayName: 'Resource',
+				displayName: 'Zasób',
 				name: 'resource',
 				type: 'options',
 				noDataExpression: true,
-				options: [{ name: 'Message', value: 'message' }],
+				options: [{ name: 'Wiadomość', value: 'message' }],
 				default: 'message',
 			},
 			{
-				displayName: 'Operation',
+				displayName: 'Operacja',
 				name: 'operation',
 				type: 'options',
 				noDataExpression: true,
 				displayOptions: { show: { resource: ['message'] } },
 				options: [
 					{
-						name: 'Get Content',
+						name: 'Pobierz treść wiadomości',
 						value: 'getContent',
-						description: 'Get the full body of a message by ID; may mark it as read',
-						action: 'Get message content',
+						description:
+							'Pobierz pełną treść wiadomości na podstawie jej ID; może to oznaczyć ją jako przeczytaną',
+						action: 'Pobierz treść wiadomości',
 					},
 					{
-						name: 'Get Many',
+						name: 'Pobierz wiadomości',
 						value: 'getAll',
-						description: 'Get inbox messages',
-						action: 'Get many messages',
+						description: 'Pobierz wiadomości ze skrzynki odbiorczej',
+						action: 'Pobierz wiadomości',
 					},
 				],
 				default: 'getAll',
 			},
 			{
-				displayName: 'Message ID',
+				displayName: 'ID wiadomości',
 				name: 'messageId',
 				type: 'string',
 				default: '',
 				required: true,
 				displayOptions: { show: { operation: ['getContent'] } },
-				description: 'Message identifier from Get Many or Librus Trigger',
+				description:
+					'Wartość messageId z operacji Pobierz wiadomości lub ze zdarzenia Nowa wiadomość',
 			},
 			{
-				displayName: 'Fetching the full message may mark it as read in Librus.',
+				displayName: 'Pobranie pełnej treści może oznaczyć wiadomość jako przeczytaną w Librusie.',
 				name: 'getContentNotice',
 				type: 'notice',
 				default: '',
 				displayOptions: { show: { operation: ['getContent'] } },
 			},
 			{
-				displayName: 'Read Status',
+				displayName: 'Status odczytania',
 				name: 'readStatus',
 				type: 'options',
 				default: 'all',
 				displayOptions: { show: { operation: ['getAll'] } },
 				options: [
-					{ name: 'All', value: 'all' },
-					{ name: 'Unread', value: 'unread' },
-					{ name: 'Read', value: 'read' },
+					{ name: 'Wszystkie', value: 'all' },
+					{ name: 'Nieprzeczytane', value: 'unread' },
+					{ name: 'Przeczytane', value: 'read' },
 				],
-				description: 'Filter the inbox before applying Limit or fetching full content',
+				description: 'Filtruj wiadomości przed zastosowaniem limitu i pobraniem pełnej treści',
 			},
 			{
-				displayName: 'Return All',
+				displayName: 'Pobierz wszystkie',
 				name: 'returnAll',
 				displayOptions: { show: { operation: ['getAll'] } },
 				type: 'boolean',
 				default: false,
-				description: 'Whether to return all results or only up to a given limit',
+				description: 'Zwróć wszystkie pasujące wiadomości, w granicach maksymalnej liczby stron',
 			},
 			{
 				displayName: 'Limit',
@@ -112,52 +116,53 @@ export class Librus implements INodeType {
 				default: 50,
 				typeOptions: { minValue: 1, maxValue: 1000 },
 				displayOptions: { show: { operation: ['getAll'], returnAll: [false] } },
-				description: 'Max number of results to return',
+				description: 'Maksymalna liczba wiadomości do pobrania',
 			},
 			{
-				displayName: 'Maximum Pages',
+				displayName: 'Maksymalna liczba stron',
 				name: 'maxPages',
 				displayOptions: { show: { operation: ['getAll'] } },
 				type: 'number',
 				default: 20,
 				typeOptions: { minValue: 1, maxValue: 50 },
 				description:
-					'Safety bound on pagination. An incomplete scan fails without emitting partial results.',
+					'Limit stron skrzynki do sprawdzenia. Niepełne pobranie kończy się błędem, bez zwracania częściowych wyników.',
 			},
 			{
-				displayName: 'Include Content',
+				displayName: 'Dołącz treść',
 				name: 'includeContent',
 				displayOptions: { show: { operation: ['getAll'] } },
 				type: 'boolean',
 				default: false,
 				description:
-					'Whether to include the message preview or fetch the full message body. Full messages may be marked as read by Librus.',
+					'Dołącz podgląd lub pełną treść wiadomości. Pobranie pełnej treści może oznaczyć wiadomość jako przeczytaną w Librusie.',
 			},
 			{
-				displayName: 'Content Source',
+				displayName: 'Zakres treści',
 				name: 'contentSource',
 				type: 'options',
 				noDataExpression: true,
 				displayOptions: { show: { operation: ['getAll'], includeContent: [true] } },
 				options: [
 					{
-						name: 'Preview',
+						name: 'Podgląd',
 						value: 'preview',
-						description: 'Read the shortened content from the inbox listing',
+						description: 'Pobierz skrócony podgląd z listy wiadomości',
 					},
 					{
-						name: 'Full Message',
+						name: 'Pełna treść',
 						value: 'full',
-						description: 'Fetch the full body for each message; this may mark it as read',
+						description:
+							'Pobierz pełną treść każdej wiadomości; może to oznaczyć ją jako przeczytaną',
 					},
 				],
 				default: 'preview',
 				description:
-					'Where to retrieve message content. Full Message makes an additional request for each message.',
+					'Wybierz podgląd lub pełną treść. Pełna treść wymaga dodatkowego zapytania dla każdej wiadomości.',
 			},
 			{
 				displayName:
-					'Fetching full messages may mark them as read in Librus. Up to 50 full messages can be fetched per execution.',
+					'Pobranie pełnej treści może oznaczyć wiadomości jako przeczytane w Librusie. W jednym wykonaniu można pobrać pełną treść maksymalnie 50 wiadomości.',
 				name: 'fullContentNotice',
 				type: 'notice',
 				default: '',
@@ -190,7 +195,7 @@ export class Librus implements INodeType {
 					});
 					return {
 						status: 'OK',
-						message: 'Successfully authenticated and read the inbox listing.',
+						message: 'Połączenie działa. Zalogowano do Librusa i odczytano listę wiadomości.',
 					};
 				} catch (error) {
 					const safe = safeError(error);

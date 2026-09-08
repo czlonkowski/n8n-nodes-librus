@@ -12,50 +12,54 @@ import { accountKey, selectNewMessages } from './pollState';
 
 export class LibrusTrigger implements INodeType {
 	description: INodeTypeDescription = {
+		// n8n uses the Trigger suffix to discover events on the shared Librus card.
 		displayName: 'Librus Trigger',
 		name: 'librusTrigger',
-		subtitle: 'New Message',
+		subtitle: 'Nowa wiadomość',
 		icon: 'file:librus.png',
 		group: ['trigger'],
 		version: 1,
-		description: 'Start a workflow when a new Librus inbox message is detected',
-		defaults: { name: 'Librus Trigger' },
+		description:
+			'Pobieraj wiadomości i ich pełną treść z Librus Synergia oraz uruchamiaj workflow po otrzymaniu nowych wiadomości',
+		defaults: { name: 'Librus — Nowa wiadomość' },
 		polling: true,
+		eventTriggerDescription: 'Po wykryciu nowej wiadomości w Librus Synergia',
 		inputs: [],
 		outputs: [NodeConnectionTypes.Main],
 		credentials: [{ name: 'librusSessionApi', required: true, testedBy: 'librusConnectionTest' }],
 		properties: [
 			{
 				displayName:
-					'The first automatic poll saves the current inbox without emitting old messages. Manual tests return one sample without changing this history. Set Poll Times to every 5 minutes or longer.',
+					'Pierwsze automatyczne sprawdzenie zapamiętuje obecną skrzynkę bez uruchamiania workflow dla starych wiadomości. Test ręczny zwraca jedną próbkę i nie zmienia historii. Ustaw harmonogram (Poll Times) na co najmniej 5 minut.',
 				name: 'baselineNotice',
 				type: 'notice',
 				default: '',
 			},
 			{
+				// n8n discovers events by this English label. Hide the sole fixed choice.
 				displayName: 'Event',
 				name: 'event',
-				type: 'options',
+				type: 'hidden',
 				noDataExpression: true,
-				options: [{ name: 'New Message', value: 'newMessage' }],
+				options: [{ name: 'Nowa wiadomość', value: 'newMessage', action: 'Nowa wiadomość' }],
 				default: 'newMessage',
 			},
 			{
-				displayName: 'Maximum Pages',
+				displayName: 'Maksymalna liczba stron',
 				name: 'maxPages',
 				type: 'number',
 				default: 20,
 				typeOptions: { minValue: 1, maxValue: 50 },
 				description:
-					'Safety bound for scanning the entire inbox. Incomplete scans fail without advancing message history.',
+					'Limit stron podczas sprawdzania całej skrzynki. Niepełny skan kończy się błędem i nie zmienia historii wykrytych wiadomości.',
 			},
 			{
-				displayName: 'Include Preview',
+				displayName: 'Dołącz podgląd',
 				name: 'includePreview',
 				type: 'boolean',
 				default: true,
 				description:
-					'Whether to include the shortened inbox preview. Use Librus → Get Content with the message ID for the full body; that may mark it as read.',
+					'Dołącz skrócony podgląd wiadomości. Pełną treść pobierzesz przez Librus → Pobierz treść wiadomości, podając jej ID. Może to oznaczyć wiadomość jako przeczytaną.',
 			},
 		],
 	};

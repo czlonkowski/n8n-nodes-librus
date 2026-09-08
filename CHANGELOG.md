@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.4 — 2026-09-08
+
+- Describe both message retrieval and new-message detection on the shared Librus card in n8n.
+- Translate node labels, actions, hints, credentials and safe error messages into Polish; update README labels to match.
+- Preserve node type names, parameter keys, operation values, output fields and error codes for existing workflows.
+
 ## 0.1.3 — 2026-09-08
 
 - Fix full inbox scans and trigger activation failing on tagged messages: accept Librus tag objects with an id field and normalize IDs to the existing string-array output.

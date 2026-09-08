@@ -72,6 +72,9 @@ project _may_ contain example nodes and/or credentials that need to be
 **removed or renamed** once you start making an actual node.
 
 ## Key guidelines
+- Write all package-owned user-facing UI text in Polish, including descriptions,
+  labels, hints and error messages. Keep stored parameter names, operation values
+  and error codes stable. The shared Librus description must cover both nodes.
 - Before every GitHub push delivering a version, bump the package version in
   both `package.json` and `package-lock.json` and update `CHANGELOG.md`.
 - Use the `n8n-node` CLI tool **whenever possible** for building, dev mode,

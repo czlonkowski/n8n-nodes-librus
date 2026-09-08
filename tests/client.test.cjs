@@ -167,7 +167,7 @@ for (const url of [
 		assert.equal(calls.length, 1);
 	});
 }
-test('credential POST redirects are never followed or replayed', async () => {
+test('credential przekierowanie POSTs are never followed or replayed', async () => {
 	const { client, calls } = setup([
 		...auth().slice(0, 2),
 		redirect('https://synergia.librus.pl/steal'),
@@ -272,7 +272,7 @@ test('a deadline reached during cookie preparation never sends a zero-timeout re
 	}
 });
 
-test('successful authorization may finish at the Synergia OAuth callback', async () => {
+test('successful authorization may finish at the powrót OAuth do Synergii', async () => {
 	const replies = auth();
 	replies[3] = redirect(
 		'https://synergia.librus.pl/loguj/portalRodzina?code=synthetic-code&state=synthetic-state',
@@ -300,7 +300,7 @@ test('a login form at the callback still stops, and diagnostics exclude URL secr
 	replies[4] = ok('<html><form><input name="Login"><input name="Pass"></form></html>');
 	await assert.rejects(setup(replies).client.getMessages(options), (error) => {
 		assert.equal(error.code, 'ACTION_REQUIRED');
-		assert.match(error.message, /Step: authorization continuation; page: Synergia OAuth callback/);
+		assert.match(error.message, /Etap: kontynuacja autoryzacji; strona: powrót OAuth do Synergii/);
 		assert.doesNotMatch(
 			error.stack + JSON.stringify(error),
 			/private-code|private-state|synthetic-password/,
@@ -318,7 +318,7 @@ test('legacy HTTP redirects to trusted Librus hosts are upgraded before sending'
 	assert.ok(calls.every((request) => request.url.startsWith('https://')));
 });
 
-test('HTTP redirect upgrade never permits URL credentials or a non-default port', async () => {
+test('HTTP redirect upgrade never permits dane logowania w adresie URL or a niestandardowy port', async () => {
 	for (const url of [
 		'http://user:private-password@api.librus.pl/OAuth/Authorization',
 		'http://api.librus.pl:444/OAuth/Authorization',
@@ -583,8 +583,8 @@ test('manual sample can succeed while a full scan reports the exact invalid meta
 		}),
 		(error) => {
 			assert.equal(error.code, 'PROTOCOL_ERROR');
-			assert.match(error.message, /Check: message.senderFirstName; received type: null/);
-			assert.match(error.message, /Inbox page: 1; page size: 50; item: 2/);
+			assert.match(error.message, /Walidacja: message.senderFirstName; otrzymany typ: null/);
+			assert.match(error.message, /Strona skrzynki: 1; rozmiar strony: 50; pozycja: 2/);
 			assert.doesNotMatch(
 				error.message + error.stack + JSON.stringify(error),
 				/synthetic-private-id|PRIVATE-TOPIC|synthetic-password/,
@@ -612,7 +612,7 @@ for (const [field, value, type] of [
 				ok({ data: [{ ...message('PRIVATE-ID'), [field]: value }] }),
 			]).client.getMessages(options),
 			(error) => {
-				assert.ok(error.message.includes(`Check: message.${field}; received type: ${type}`));
+				assert.ok(error.message.includes(`Walidacja: message.${field}; otrzymany typ: ${type}`));
 				assert.doesNotMatch(error.message + JSON.stringify(error), /PRIVATE|synthetic-password/);
 				return true;
 			},
@@ -631,9 +631,9 @@ test('later-page protocol errors identify the page without treating the scan as 
 			returnAll: true,
 		}),
 		(error) => {
-			assert.match(error.message, /Check: inbox data array; received type: object/);
-			assert.match(error.message, /Inbox page: 2; page size: 50/);
-			assert.doesNotMatch(error.message, /PRIVATE|item:/);
+			assert.match(error.message, /Walidacja: tablica wiadomości; otrzymany typ: object/);
+			assert.match(error.message, /Strona skrzynki: 2; rozmiar strony: 50/);
+			assert.doesNotMatch(error.message, /PRIVATE|pozycja:/);
 			return true;
 		},
 	);
@@ -642,8 +642,8 @@ test('non-JSON inbox response has a safe diagnostic instead of copying HTML', as
 	await assert.rejects(
 		setup([...auth(), ok('<html>PRIVATE-PAGE</html>')]).client.getMessages(options),
 		(error) => {
-			assert.match(error.message, /Check: HTML instead of JSON/);
-			assert.match(error.message, /Inbox page: 1/);
+			assert.match(error.message, /Walidacja: HTML zamiast JSON/);
+			assert.match(error.message, /Strona skrzynki: 1/);
 			assert.doesNotMatch(error.message, /PRIVATE-PAGE/);
 			return true;
 		},
@@ -653,8 +653,8 @@ test('protocol errors during authentication are identified without raw response 
 	await assert.rejects(
 		setup([...auth().slice(0, 2), ok('PRIVATE-NOT-JSON')]).client.getMessages(options),
 		(error) => {
-			assert.match(error.message, /Check: JSON response/);
-			assert.match(error.message, /Phase: authentication/);
+			assert.match(error.message, /Walidacja: odpowiedź JSON/);
+			assert.match(error.message, /Faza: logowanie/);
 			assert.doesNotMatch(
 				error.message + JSON.stringify(error),
 				/PRIVATE-NOT-JSON|synthetic-password/,
@@ -706,7 +706,7 @@ for (const tag of [
 			),
 			(error) => {
 				assert.equal(error.code, 'PROTOCOL_ERROR');
-				assert.match(error.message, /Check: message.tags/);
+				assert.match(error.message, /Walidacja: message.tags/);
 				return true;
 			},
 		);

@@ -87,7 +87,7 @@ test('state corruption and capacity exhaustion leave history unchanged', () => {
 		const before = JSON.stringify(state);
 		assert.throws(
 			() => selectNewMessages(state, account, [message('new')]),
-			/saved Librus trigger state|history limit/,
+			/Zapisana historia|limit historii/,
 		);
 		assert.equal(JSON.stringify(state), before);
 	}
@@ -223,8 +223,8 @@ test('activation preserves history and surfaces safe diagnostics for invalid lat
 		return replies.shift();
 	};
 	await assert.rejects(new LibrusTrigger().poll.call(ctx), (error) => {
-		assert.match(error.message, /Check: message.senderFirstName; received type: null/);
-		assert.match(error.message, /Inbox page: 2; page size: 50; item: 1/);
+		assert.match(error.message, /Walidacja: message.senderFirstName; otrzymany typ: null/);
+		assert.match(error.message, /Strona skrzynki: 2; rozmiar strony: 50; pozycja: 1/);
 		assert.doesNotMatch(
 			error.message + error.stack + JSON.stringify(error),
 			/PRIVATE-ID|PRIVATE-TOPIC|secret-password|synthetic-login/,

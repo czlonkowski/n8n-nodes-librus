@@ -3,6 +3,21 @@ import { configWithoutCloudSupport } from '@n8n/node-cli/eslint';
 export default [
 	...configWithoutCloudSupport,
 	{
+		files: ['nodes/Librus/*.node.ts', 'credentials/LibrusSessionApi.credentials.ts'],
+		rules: {
+			// This package is Polish-only: English wording/title-case conventions do not apply.
+			'n8n-nodes-base/node-param-display-name-miscased': 'off',
+			'n8n-nodes-base/node-param-operation-option-action-miscased': 'off',
+			'n8n-nodes-base/node-param-option-name-wrong-for-get-many': 'off',
+			'n8n-nodes-base/node-param-description-boolean-without-whether': 'off',
+			'n8n-nodes-base/node-param-description-wrong-for-return-all': 'off',
+			'n8n-nodes-base/node-param-description-wrong-for-limit': 'off',
+			'n8n-nodes-base/cred-class-field-display-name-miscased': 'off',
+			'n8n-nodes-base/cred-class-field-display-name-missing-api': 'off',
+		},
+	},
+
+	{
 		files: ['nodes/Librus/Librus.node.ts', 'nodes/Librus/LibrusTrigger.node.ts'],
 		rules: {
 			// Internal sanitized errors are converted at the n8n boundary.
