@@ -12,3 +12,7 @@ coverage/
 
 # Local publishing credentials must never enter Git.
 .npmrc
+
+# Agent scratch: worktrees and subagent-driven-development state.
+.claude/worktrees/
+.superpowers/
