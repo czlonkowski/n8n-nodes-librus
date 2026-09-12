@@ -83,6 +83,8 @@ Przykładowy workflow: **Librus — Nowa wiadomość → Librus (Pobierz treść
 
 Każdy element zawiera m.in. `changeType`, `eventKey`, `eventId`, `route`, `date`, `subject`, `teacher`, `description`, `rodzaj`, `room`, `addedAt`, `details`, `changedFields` oraz `previous`; dla nowych wydarzeń te dwa ostatnie pola są puste (`changedFields: []`, `previous: null`), a przy zmianach niosą listę zmienionych pól i poprzednią wersję, przy usunięciach zaś poprzednią wersję.
 
+Wykrywanie zmian opiera się wyłącznie na tym, co pokazuje siatka terminarza — na dacie, tekście komórki, nauczycielu i opisie. Edycja widoczna tylko na stronie szczegółów wydarzenia (np. sama zmiana sali) nie wywoła zdarzenia zmiany, dopóki nie zajdzie razem z inną, widoczną w siatce edycją. Usunięcie wydarzenia nigdy nie niesie pola `details` (jest `null`) — to, co zniknęło, opisuje pole `previous`.
+
 ## Ograniczenia i rozwiązywanie problemów
 
 - **Oznaczanie jako nieprzeczytane lub przeczytane**, wysyłanie, usuwanie i pobieranie załączników nie są obsługiwane. Odczyt pełnej treści może sam zmienić status wiadomości w Librusie.

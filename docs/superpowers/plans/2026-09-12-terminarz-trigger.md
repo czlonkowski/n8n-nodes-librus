@@ -1,5 +1,7 @@
 # Librus calendar trigger — implementation plan
 
+> **Historical planning artifact.** This plan predates code review, and review found defects in some of its code snippets that the shipped implementation fixes. It is kept as the record of what was planned, not updated to match what shipped — where it differs from the shipped code, `nodes/Librus/` and `docs/architecture.md` are authoritative. Superseded snippets are marked in place below.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Add two polling events to the Librus Trigger node — a calendar entry was added, and a calendar entry changed (edited, moved to another date, or removed).
@@ -236,6 +238,8 @@ Run: `npm test`
 Expected: FAIL — `Cannot find module '../dist/nodes/Librus/terminarz'`.
 
 - [ ] **Step 3: Implement `nodes/Librus/terminarz.ts`**
+
+> **Superseded:** the `parseMonth` function below ends each day block at the next block's start and takes only the first day-number marker via `.exec`. Review found this lets page chrome after the grid (a legend, a footer) be absorbed into the last day, and lets a block with more than one day-number marker parse instead of failing. The shipped `parseMonth` (`nodes/Librus/terminarz.ts`) ends each block with a depth-counting `blockEnd` and requires exactly one marker per block; see `docs/architecture.md`.
 
 ```ts
 import { createHash } from 'node:crypto';
@@ -1529,6 +1533,8 @@ Run: `npm test`
 Expected: FAIL — `commitCalendarPoll is not a function`.
 
 - [ ] **Step 3: Implement the commit half**
+
+> **Superseded:** `commitCalendarPoll` below compares the stored owner against the new `account` (`owner !== account`). Review found this the credential-change livelock: after a deliberate account or credential change, the stored owner is by definition the old account, so every poll from then on would abort silently and forever. The shipped `commitCalendarPoll` (`nodes/Librus/calendarState.ts`) compares against the owner captured on the plan (`plan.owner`) instead; see `docs/architecture.md`.
 
 ```ts
 import type { CalendarDetail } from './terminarz';
