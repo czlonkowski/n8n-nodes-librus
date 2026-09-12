@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { IDataObject } from 'n8n-workflow';
 import { LibrusError } from './errors';
-import type { CalendarEntry } from './terminarz';
+import type { CalendarDetail, CalendarEntry } from './terminarz';
 
 export const MAX_EVENTS = 2000;
 /** Must not exceed MAX_DETAILS in LibrusClient; the client bounds hydration independently. */
@@ -168,4 +168,149 @@ export function planCalendarPoll(
 			);
 	const hydrate = [...added, ...changed].sort().slice(0, MAX_HYDRATION);
 	return { rev, baseline, window, silent, entries: map, stored, added, changed, removed, hydrate };
+}
+
+export interface CalendarChange {
+	changeType: 'new' | 'changed' | 'removed';
+	key: string;
+	route: string | null;
+	eventId: string | null;
+	event: CalendarSnapshot;
+	previous: CalendarSnapshot | null;
+	changedFields: string[];
+}
+
+export function entrySnapshot(
+	entry: CalendarEntry,
+	detail: CalendarDetail | null,
+): CalendarSnapshot {
+	return {
+		date: entry.date,
+		text: entry.text,
+		subject: detail?.subject ?? entry.subject,
+		teacher: detail?.teacher ?? entry.teacher,
+		description: detail?.description ?? entry.description,
+		lessonNumber: detail?.lessonNumber ?? entry.lessonNumber,
+		hour: entry.hour,
+		rodzaj: detail?.rodzaj ?? null,
+		room: detail?.room ?? null,
+		addedAt: detail?.addedAt ?? null,
+	};
+}
+
+function diffFields(before: CalendarSnapshot, after: CalendarSnapshot): string[] {
+	return (Object.keys(after) as (keyof CalendarSnapshot)[]).filter(
+		(field) => before[field] !== after[field],
+	);
+}
+
+function routeOf(key: string): string | null {
+	const route = key.slice(0, key.indexOf('/'));
+	return route === 'szczegoly' || route === 'szczegoly_wolne' ? route : null;
+}
+
+/**
+ * An entry with no detail link has no stable identity, so an edit looks like a
+ * disappearance plus an appearance. When exactly one of each falls on the same date in
+ * one poll, report a change. A real deletion and a real addition on that date collapse
+ * into one reported change; that is the accepted cost of having no identifier.
+ */
+function pairSynthetic(changes: CalendarChange[]): CalendarChange[] {
+	const byDate = new Map<string, { added: CalendarChange[]; removed: CalendarChange[] }>();
+	for (const change of changes) {
+		if (!change.key.startsWith('hash/')) continue;
+		if (change.changeType !== 'new' && change.changeType !== 'removed') continue;
+		const bucket = byDate.get(change.event.date) ?? { added: [], removed: [] };
+		if (change.changeType === 'new') bucket.added.push(change);
+		else bucket.removed.push(change);
+		byDate.set(change.event.date, bucket);
+	}
+	const dropped = new Set<CalendarChange>();
+	for (const bucket of byDate.values()) {
+		if (bucket.added.length !== 1 || bucket.removed.length !== 1) continue;
+		const [added] = bucket.added;
+		const [removed] = bucket.removed;
+		added.changeType = 'changed';
+		added.previous = removed.event;
+		added.changedFields = diffFields(removed.event, added.event);
+		dropped.add(removed);
+	}
+	return changes.filter((change) => !dropped.has(change));
+}
+
+export function commitCalendarPoll(
+	state: IDataObject,
+	account: string,
+	plan: CalendarPlan,
+	details: Map<string, CalendarDetail | null>,
+): { aborted: boolean; changes: CalendarChange[] } {
+	// Hydration awaited between planning and here, so re-check what we compared against.
+	const current = state.librusCalendar as Record<string, unknown> | undefined;
+	const rev = current === undefined ? 0 : current.rev;
+	const owner = current === undefined ? account : current.account;
+	if (rev !== plan.rev || owner !== account) return { aborted: true, changes: [] };
+
+	const candidates = new Set([...plan.added, ...plan.changed]);
+	const removedKeys = new Set(plan.removed);
+	const events: Record<string, StoredEvent> = {};
+	for (const [key, record] of Object.entries(plan.stored)) {
+		if (record.m < plan.window.from) continue; // out of the window, unobservable from now on
+		if (removedKeys.has(key)) continue;
+		events[key] = record; // untouched: unchanged entries and deferred changes keep their old record
+	}
+	const changes: CalendarChange[] = [];
+	for (const [key, entry] of plan.entries) {
+		const month = monthOf(entry.date);
+		const isSilent = plan.silent.has(month);
+		if (!plan.baseline && !isSilent) {
+			if (!candidates.has(key)) continue; // unchanged; the copy above already carried it over
+			if (!details.has(key)) continue; // unresolved hydration; deferred, keeps the old record
+		}
+		const detail = details.get(key) ?? null;
+		const before = plan.stored[key];
+		const record: StoredEvent = { m: month, f: fingerprint(entry), s: entrySnapshot(entry, detail) };
+		events[key] = record;
+		if (plan.baseline || isSilent) continue;
+		if (!before)
+			changes.push({
+				changeType: 'new',
+				key,
+				route: entry.route,
+				eventId: entry.eventId,
+				event: record.s,
+				previous: null,
+				changedFields: [],
+			});
+		else if (before.f !== record.f)
+			changes.push({
+				changeType: 'changed',
+				key,
+				route: entry.route,
+				eventId: entry.eventId,
+				event: record.s,
+				previous: before.s,
+				changedFields: diffFields(before.s, record.s),
+			});
+	}
+	for (const key of plan.removed) {
+		const before = plan.stored[key];
+		changes.push({
+			changeType: 'removed',
+			key,
+			route: routeOf(key),
+			eventId: routeOf(key) ? key.slice(key.indexOf('/') + 1) : null,
+			event: before.s,
+			previous: before.s,
+			changedFields: [],
+		});
+	}
+	if (Object.keys(events).length > MAX_EVENTS) throw new LibrusError('CALENDAR_STATE_LIMIT');
+	state.librusCalendar = {
+		version: 1,
+		rev: plan.rev + 1,
+		account,
+		window: { from: plan.window.from, monthsAhead: plan.window.monthsAhead },
+		events,
+	};
+	return { aborted: false, changes: pairSynthetic(changes) };
 }
