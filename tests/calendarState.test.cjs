@@ -62,7 +62,11 @@ test('additions, edits and disappearances inside the window are detected', () =>
 			account,
 			window: { from: '2026-09', monthsAhead: 1 },
 			events: {
-				'szczegoly/1': { m: '2026-09', f: fingerprint(entry('szczegoly/1', '2026-09-18')), s: snap('2026-09-18') },
+				'szczegoly/1': {
+					m: '2026-09',
+					f: fingerprint(entry('szczegoly/1', '2026-09-18')),
+					s: snap('2026-09-18'),
+				},
 				'szczegoly/2': { m: '2026-09', f: 'stale', s: snap('2026-09-18') },
 				'szczegoly/3': { m: '2026-09', f: 'gone', s: snap('2026-09-10') },
 				'szczegoly/4': { m: '2026-12', f: 'outside', s: snap('2026-12-01') },
@@ -99,6 +103,33 @@ test('months added by growing the window are baselined silently', () => {
 	);
 	assert.deepEqual([...plan.silent], ['2026-11', '2026-12']);
 	assert.deepEqual(plan.added, ['szczegoly/1']);
+});
+
+test('growth silences only what the growth itself added, not what time already brought in', () => {
+	const state = {
+		librusCalendar: {
+			version: 1,
+			rev: 1,
+			account,
+			window: { from: '2026-09', monthsAhead: 1 },
+			events: {},
+		},
+	};
+	// Two months passed and the span was raised from 1 to 3 before the next poll. With the
+	// old span, time alone would already have reached 2026-11 and 2026-12, so those months
+	// must still emit; only 2027-01 and 2027-02 exist because the span grew.
+	const plan = planCalendarPoll(
+		state,
+		account,
+		window('2026-11', 3, ['2026-11', '2026-12', '2027-01', '2027-02']),
+		[
+			entry('szczegoly/1', '2026-11-05'),
+			entry('szczegoly/2', '2026-12-01'),
+			entry('szczegoly/3', '2027-01-10'),
+		],
+	);
+	assert.deepEqual([...plan.silent], ['2027-01', '2027-02']);
+	assert.deepEqual(plan.added, ['szczegoly/1', 'szczegoly/2']);
 });
 
 test('a window that advances with time keeps emitting the newly reachable month', () => {
@@ -160,9 +191,52 @@ test('corrupt stored state fails instead of silently resetting history', () => {
 	for (const broken of [
 		{ librusCalendar: [] },
 		{ librusCalendar: { version: 2, rev: 0, account, window: {}, events: {} } },
-		{ librusCalendar: { version: 1, rev: -1, account, window: { from: '2026-09', monthsAhead: 1 }, events: {} } },
-		{ librusCalendar: { version: 1, rev: 0, account, window: { from: 'x', monthsAhead: 1 }, events: {} } },
-		{ librusCalendar: { version: 1, rev: 0, account, window: { from: '2026-09', monthsAhead: 1 }, events: { a: 1 } } },
+		{
+			librusCalendar: {
+				version: 1,
+				rev: -1,
+				account,
+				window: { from: '2026-09', monthsAhead: 1 },
+				events: {},
+			},
+		},
+		{
+			librusCalendar: {
+				version: 1,
+				rev: 0,
+				account,
+				window: { from: 'x', monthsAhead: 1 },
+				events: {},
+			},
+		},
+		{
+			librusCalendar: {
+				version: 1,
+				rev: 0,
+				account,
+				window: { from: '2026-09', monthsAhead: 1 },
+				events: { a: 1 },
+			},
+		},
+		// `m` is typed but not a month: such a record would be neither prunable nor removable.
+		{
+			librusCalendar: {
+				version: 1,
+				rev: 0,
+				account,
+				window: { from: '2026-09', monthsAhead: 1 },
+				events: { 'szczegoly/1': { m: 'wrzesień', f: 'x', s: snap('2026-09-18') } },
+			},
+		},
+		{
+			librusCalendar: {
+				version: 1,
+				rev: 0,
+				account,
+				window: { from: '2026-09', monthsAhead: 1 },
+				events: { 'szczegoly/1': { m: '2026-13', f: 'x', s: snap('2026-09-18') } },
+			},
+		},
 	])
 		assert.throws(
 			() => planCalendarPoll(broken, account, window('2026-09', 1, ['2026-09', '2026-10']), []),
@@ -336,6 +410,52 @@ test('a concurrent write aborts the commit and leaves history untouched', () => 
 	assert.equal('szczegoly/1' in state.librusCalendar.events, false);
 });
 
+test('an account change commits a silent baseline instead of aborting every later poll', () => {
+	const state = {};
+	const span = window('2026-09', 0, ['2026-09']);
+	const other = accountKey('other-login', 'credential-2');
+	run(state, account, span, [entry('szczegoly/1', '2026-09-18')]);
+	const switched = run(
+		state,
+		other,
+		span,
+		[entry('szczegoly/2', '2026-09-19')],
+		new Map([['szczegoly/2', detail('Sprawdzian')]]),
+	);
+	assert.equal(switched.aborted, false);
+	assert.deepEqual(switched.changes, []);
+	assert.equal(state.librusCalendar.account, other);
+	assert.deepEqual(Object.keys(state.librusCalendar.events), ['szczegoly/2']);
+	const third = run(
+		state,
+		other,
+		span,
+		[entry('szczegoly/2', '2026-09-19'), entry('szczegoly/3', '2026-09-20')],
+		new Map([['szczegoly/3', detail('Wycieczka')]]),
+	);
+	assert.deepEqual(
+		third.changes.map((change) => [change.changeType, change.key]),
+		[['new', 'szczegoly/3']],
+	);
+});
+
+test('a concurrent write that replaces the owner still aborts the commit', () => {
+	const state = {};
+	const span = window('2026-09', 0, ['2026-09']);
+	run(state, account, span, []);
+	const plan = planCalendarPoll(state, account, span, [entry('szczegoly/1', '2026-09-18')]);
+	// Another execution re-baselined onto a different account while details were fetched.
+	state.librusCalendar.account = accountKey('intruder', 'credential-9');
+	const result = commitCalendarPoll(
+		state,
+		account,
+		plan,
+		new Map([['szczegoly/1', detail('Sprawdzian')]]),
+	);
+	assert.deepEqual(result, { aborted: true, changes: [] });
+	assert.equal('szczegoly/1' in state.librusCalendar.events, false);
+});
+
 test('entries whose month leaves the window are pruned', () => {
 	const state = {};
 	run(state, account, window('2026-09', 0, ['2026-09']), [entry('szczegoly/1', '2026-09-18')]);
@@ -372,12 +492,10 @@ test('exceeding the history cap fails without mutating stored history', () => {
 test('a silently discovered month from a growing window is recorded but never emitted', () => {
 	const state = {};
 	run(state, account, window('2026-09', 0, ['2026-09']), [entry('szczegoly/1', '2026-09-18')]);
-	const result = run(
-		state,
-		account,
-		window('2026-09', 2, ['2026-09', '2026-10', '2026-11']),
-		[entry('szczegoly/1', '2026-09-18'), entry('szczegoly/9', '2026-11-05')],
-	);
+	const result = run(state, account, window('2026-09', 2, ['2026-09', '2026-10', '2026-11']), [
+		entry('szczegoly/1', '2026-09-18'),
+		entry('szczegoly/9', '2026-11-05'),
+	]);
 	assert.deepEqual(result.changes, []);
 	assert.ok('szczegoly/9' in state.librusCalendar.events);
 	assert.equal(state.librusCalendar.events['szczegoly/9'].s.date, '2026-11-05');

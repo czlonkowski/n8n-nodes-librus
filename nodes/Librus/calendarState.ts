@@ -31,6 +31,8 @@ export interface StoredEvent {
 }
 export interface CalendarPlan {
 	rev: number;
+	/** Account fingerprint stored when the plan was made, or the current one if nothing was. */
+	owner: string;
 	baseline: boolean;
 	window: CalendarWindow;
 	silent: Set<string>;
@@ -75,12 +77,14 @@ export function fingerprint(entry: CalendarEntry): string {
 		.slice(0, 32);
 }
 
+const MONTH_PATTERN = /^\d{4}-(?:0[1-9]|1[0-2])$/;
+
 function validWindow(value: unknown): boolean {
 	if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
 	const window = value as Record<string, unknown>;
 	return (
 		typeof window.from === 'string' &&
-		/^\d{4}-(?:0[1-9]|1[0-2])$/.test(window.from) &&
+		MONTH_PATTERN.test(window.from) &&
 		Number.isInteger(window.monthsAhead) &&
 		(window.monthsAhead as number) >= 0 &&
 		(window.monthsAhead as number) <= 6
@@ -96,8 +100,11 @@ function validEvents(value: unknown): boolean {
 	return Object.values(events).every((record) => {
 		if (typeof record !== 'object' || record === null || Array.isArray(record)) return false;
 		const stored = record as Record<string, unknown>;
+		// `m` decides both pruning and removal detection: a typed but malformed month
+		// would leave a record neither prunable nor removable, so it is rejected here.
 		if (
 			typeof stored.m !== 'string' ||
+			!MONTH_PATTERN.test(stored.m) ||
 			typeof stored.f !== 'string' ||
 			!stored.f ||
 			typeof stored.s !== 'object' ||
@@ -106,7 +113,11 @@ function validEvents(value: unknown): boolean {
 		)
 			return false;
 		const snapshot = stored.s as Record<string, unknown>;
-		return typeof snapshot.date === 'string' && DATE_PATTERN.test(snapshot.date) && typeof snapshot.text === 'string';
+		return (
+			typeof snapshot.date === 'string' &&
+			DATE_PATTERN.test(snapshot.date) &&
+			typeof snapshot.text === 'string'
+		);
 	});
 }
 
@@ -122,8 +133,8 @@ export function planCalendarPoll(
 	const previous = raw as Record<string, unknown> | undefined;
 	let stored: Record<string, StoredEvent> = {};
 	let rev = 0;
+	let owner = account;
 	let baseline = true;
-	let horizon: string | undefined;
 	let storedAhead = -1;
 	if (previous !== undefined) {
 		if (
@@ -136,20 +147,25 @@ export function planCalendarPoll(
 		)
 			throw new LibrusError('CALENDAR_STATE_INVALID');
 		rev = previous.rev as number;
+		owner = previous.account as string;
 		if (previous.account === account) {
 			stored = { ...(previous.events as Record<string, StoredEvent>) };
 			baseline = false;
-			const saved = previous.window as { from: string; monthsAhead: number };
-			storedAhead = saved.monthsAhead;
-			horizon = addMonths(saved.from, saved.monthsAhead);
+			storedAhead = (previous.window as { monthsAhead: number }).monthsAhead;
 		}
 	}
 	// Months that appear only because the configured span grew were never observable
 	// before, so they are recorded without emitting. A window advancing with time is
-	// ordinary discovery and still emits.
+	// ordinary discovery and still emits — so the silent set is measured against the
+	// horizon the *current* start month would have reached under the *old* span, not
+	// against the horizon stored at the last poll. Using the stored horizon would also
+	// silence months that plain time-advance had already brought in, losing real
+	// notifications whenever a span change and a month boundary land between two polls.
 	const silent = new Set<string>();
-	if (!baseline && horizon !== undefined && window.monthsAhead > storedAhead)
-		for (const month of window.months) if (month > horizon) silent.add(month);
+	if (!baseline && storedAhead >= 0 && window.monthsAhead > storedAhead) {
+		const grown = addMonths(window.from, storedAhead);
+		for (const month of window.months) if (month > grown) silent.add(month);
+	}
 	const map = new Map(entries.map((entry) => [entry.key, entry]));
 	const added: string[] = [];
 	const changed: string[] = [];
@@ -167,7 +183,19 @@ export function planCalendarPoll(
 				(key) => scanned.has(stored[key].m) && !silent.has(stored[key].m) && !map.has(key),
 			);
 	const hydrate = [...added, ...changed].sort().slice(0, MAX_HYDRATION);
-	return { rev, baseline, window, silent, entries: map, stored, added, changed, removed, hydrate };
+	return {
+		rev,
+		owner,
+		baseline,
+		window,
+		silent,
+		entries: map,
+		stored,
+		added,
+		changed,
+		removed,
+		hydrate,
+	};
 }
 
 export interface CalendarChange {
@@ -245,10 +273,14 @@ export function commitCalendarPoll(
 	details: Map<string, CalendarDetail | null>,
 ): { aborted: boolean; changes: CalendarChange[] } {
 	// Hydration awaited between planning and here, so re-check what we compared against.
+	// The guard detects a concurrent write, not a change of account: it compares the
+	// stored owner against the owner observed at plan time. Comparing it against the
+	// *new* account would make every poll after a credential change abort forever,
+	// silently, because the stored owner is by definition the old one.
 	const current = state.librusCalendar as Record<string, unknown> | undefined;
 	const rev = current === undefined ? 0 : current.rev;
-	const owner = current === undefined ? account : current.account;
-	if (rev !== plan.rev || owner !== account) return { aborted: true, changes: [] };
+	const owner = current === undefined ? plan.owner : current.account;
+	if (rev !== plan.rev || owner !== plan.owner) return { aborted: true, changes: [] };
 
 	const candidates = new Set([...plan.added, ...plan.changed]);
 	const removedKeys = new Set(plan.removed);
@@ -268,7 +300,11 @@ export function commitCalendarPoll(
 		}
 		const detail = details.get(key) ?? null;
 		const before = plan.stored[key];
-		const record: StoredEvent = { m: month, f: fingerprint(entry), s: entrySnapshot(entry, detail) };
+		const record: StoredEvent = {
+			m: month,
+			f: fingerprint(entry),
+			s: entrySnapshot(entry, detail),
+		};
 		events[key] = record;
 		if (plan.baseline || isSilent) continue;
 		if (!before)

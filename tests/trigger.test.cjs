@@ -481,6 +481,60 @@ test('a manual test returns a bounded sample and never touches history', async (
 	assert.deepEqual(state, {});
 });
 
+test('a credential change re-baselines the calendar instead of going silent forever', async () => {
+	const other = accountKey('other-login', 'credential-2');
+	const asAccount = (state, username, credentialId) => {
+		const base = calendarContext(state, 'newCalendarEvent');
+		return {
+			...base,
+			getCredentials: async () => ({ username, password: 'secret-password' }),
+			getNode: () => ({
+				...base.getNode(),
+				credentials: { librusSessionApi: { id: credentialId, name: 'Librus' } },
+			}),
+		};
+	};
+	const trigger = new LibrusTrigger();
+	const state = {};
+	let restore = stubCalendar([calendarEntry('szczegoly/1', '2026-09-18')], new Map());
+	try {
+		assert.equal(
+			await trigger.poll.call(asAccount(state, 'synthetic-login', 'credential-1')),
+			null,
+		);
+	} finally {
+		restore();
+	}
+	assert.equal(state.librusCalendar.account, account);
+	restore = stubCalendar(
+		[calendarEntry('szczegoly/2', '2026-09-19')],
+		new Map([['szczegoly/2', calendarDetail('Sprawdzian')]]),
+	);
+	try {
+		// The switch itself emits nothing, but it must commit: the old code aborted here
+		// and then aborted on every later poll, forever and without a word.
+		assert.equal(await trigger.poll.call(asAccount(state, 'other-login', 'credential-2')), null);
+	} finally {
+		restore();
+	}
+	assert.equal(state.librusCalendar.account, other);
+	assert.deepEqual(Object.keys(state.librusCalendar.events), ['szczegoly/2']);
+	restore = stubCalendar(
+		[calendarEntry('szczegoly/2', '2026-09-19'), calendarEntry('szczegoly/3', '2026-09-20')],
+		new Map([['szczegoly/3', calendarDetail('Wycieczka')]]),
+	);
+	let result;
+	try {
+		result = await trigger.poll.call(asAccount(state, 'other-login', 'credential-2'));
+	} finally {
+		restore();
+	}
+	assert.deepEqual(
+		result[0].map((item) => [item.json.changeType, item.json.eventKey]),
+		[['new', 'szczegoly/3']],
+	);
+});
+
 test('the message event keeps its existing behaviour and its own state key', async () => {
 	const state = {
 		librusCalendar: {
