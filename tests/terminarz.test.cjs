@@ -157,6 +157,17 @@ test('maps the detail table onto named fields and keeps the raw labels', () => {
 	assert.equal(parsed.fields['Przedmiot'], 'Matematyka');
 });
 
+test('an unsafe integer lesson number is rejected rather than stored', () => {
+	const parsed = parseEventDetail(
+		detail([
+			['Data', '2026-09-18'],
+			['Nr lekcji', '1e21'],
+			['Przedmiot', 'Matematyka'],
+		]),
+	);
+	assert.equal(parsed.lessonNumber, null);
+});
+
 test('a teacher absence detail with different labels still parses', () => {
 	const parsed = parseEventDetail(
 		detail([

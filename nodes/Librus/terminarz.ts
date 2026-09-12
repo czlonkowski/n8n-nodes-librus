@@ -185,7 +185,7 @@ export function parseEventDetail(html: string): CalendarDetail {
 		teacher: fields['Nauczyciel'] ?? null,
 		subject: fields['Przedmiot'] ?? null,
 		description: fields['Opis'] ?? null,
-		lessonNumber: Number.isInteger(lesson) && lesson >= 0 ? lesson : null,
+		lessonNumber: Number.isSafeInteger(lesson) && lesson >= 0 ? lesson : null,
 		date: fields['Data'] ?? null,
 	};
 }
