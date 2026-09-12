@@ -14,6 +14,18 @@ export interface CalendarEntry {
 	text: string;
 }
 
+export interface CalendarDetail {
+	fields: Record<string, string>;
+	rodzaj: string | null;
+	room: string | null;
+	addedAt: string | null;
+	teacher: string | null;
+	subject: string | null;
+	description: string | null;
+	lessonNumber: number | null;
+	date: string | null;
+}
+
 type TerminarzCheck =
 	| 'siatka terminarza'
 	| 'numery dni miesiąca'
@@ -119,4 +131,31 @@ export function parseMonth(html: string, year: number, month: number): CalendarE
 	if (days.size !== length || Math.max(...days) !== length)
 		throw protocolError('numery dni miesiąca', days.size);
 	return entries;
+}
+
+export function parseEventDetail(html: string): CalendarDetail {
+	if (typeof html !== 'string') throw protocolError('dokument HTML', html);
+	const fields: Record<string, string> = {};
+	for (const row of html.matchAll(/<tr\b[^>]*>([\s\S]*?)<\/tr>/gi)) {
+		const label = /<th\b[^>]*>([\s\S]*?)<\/th>/i.exec(row[1]);
+		const value = /<td\b[^>]*>([\s\S]*?)<\/td>/i.exec(row[1]);
+		if (!label || !value) continue;
+		const name = text(label[1]).replace(/:$/, '').trim();
+		if (name && !(name in fields)) fields[name] = text(value[1]);
+	}
+	// Label sets differ between entry kinds, so require structure, not specific labels.
+	if (Object.keys(fields).length < 2)
+		throw protocolError('tabela szczegółów', Object.keys(fields).length);
+	const lesson = fields['Nr lekcji'] ? Number(fields['Nr lekcji']) : NaN;
+	return {
+		fields,
+		rodzaj: fields['Rodzaj'] ?? null,
+		room: fields['Sala'] ?? null,
+		addedAt: fields['Data dodania'] ?? null,
+		teacher: fields['Nauczyciel'] ?? null,
+		subject: fields['Przedmiot'] ?? null,
+		description: fields['Opis'] ?? null,
+		lessonNumber: Number.isInteger(lesson) && lesson >= 0 ? lesson : null,
+		date: fields['Data'] ?? null,
+	};
 }

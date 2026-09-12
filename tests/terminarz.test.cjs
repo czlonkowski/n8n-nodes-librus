@@ -1,6 +1,6 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { parseMonth, decodeEntities } = require('../dist/nodes/Librus/terminarz');
+const { parseMonth, decodeEntities, parseEventDetail } = require('../dist/nodes/Librus/terminarz');
 
 const day = (number, rows = '') =>
 	`<div class="kalendarz-dzien"><div class="kalendarz-numer-dnia">${number}</div><table>${rows}</table></div>`;
@@ -69,5 +69,53 @@ test('an incomplete or duplicated day grid fails rather than guessing dates', ()
 });
 
 test('named, decimal, hexadecimal entities and non-breaking spaces decode', () => {
-	assert.equal(decodeEntities('a&amp;b&nbsp;c&#322;&#x142;&quot;'), 'a&b\u00a0cłł"');
+	assert.equal(decodeEntities('a&amp;b&nbsp;c&#322;&#x142;&quot;'), 'a&b cłł"');
+});
+
+const detail = (rows) =>
+	`<div class="container-background"><table class="decorated medium center"><tbody>${rows
+		.map(
+			([label, value], index) =>
+				`<tr class="line${index % 2}"><th>${label}</th><td>${value}</td></tr>`,
+		)
+		.join('')}</tbody></table></div>`;
+
+test('maps the detail table onto named fields and keeps the raw labels', () => {
+	const parsed = parseEventDetail(
+		detail([
+			['Data', '2026-09-18'],
+			['Nr lekcji', '3'],
+			['Nauczyciel', 'Jan Kowalski'],
+			['Rodzaj', 'Sprawdzian'],
+			['Przedmiot', 'Matematyka'],
+			['Sala', '12'],
+			['Opis', 'Zakres:&nbsp;ułamki<br />i procenty'],
+			['Data dodania', '2026-09-01 12:03:00'],
+		]),
+	);
+	assert.equal(parsed.rodzaj, 'Sprawdzian');
+	assert.equal(parsed.room, '12');
+	assert.equal(parsed.lessonNumber, 3);
+	assert.equal(parsed.description, 'Zakres: ułamki\ni procenty');
+	assert.equal(parsed.addedAt, '2026-09-01 12:03:00');
+	assert.equal(parsed.fields['Przedmiot'], 'Matematyka');
+});
+
+test('a teacher absence detail with different labels still parses', () => {
+	const parsed = parseEventDetail(
+		detail([
+			['Nauczyciel', 'Anna Nowak'],
+			['Przedział czasu', '2026-09-18 - 2026-09-20'],
+			['Data dodania', '2026-09-10 08:00:00'],
+		]),
+	);
+	assert.equal(parsed.rodzaj, null);
+	assert.equal(parsed.teacher, 'Anna Nowak');
+	assert.equal(parsed.fields['Przedział czasu'], '2026-09-18 - 2026-09-20');
+});
+
+test('a page that is not a detail table fails loudly', () => {
+	assert.throws(() => parseEventDetail('<html><body><p>Błąd</p></body></html>'), {
+		message: /Walidacja: tabela szczegółów/,
+	});
 });
