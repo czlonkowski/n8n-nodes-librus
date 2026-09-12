@@ -22,6 +22,7 @@ const entry = (key, date, text = 'Matematyka') => ({
 	text,
 });
 const window = (from, monthsAhead, months) => ({ from, monthsAhead, months });
+const snap = (date = '2026-09-18', text = 'Matematyka') => ({ date, text });
 
 test('builds an inclusive month window and rejects impossible spans', () => {
 	assert.deepEqual(monthWindow(new Date(2026, 10, 15), 2), {
@@ -60,10 +61,10 @@ test('additions, edits and disappearances inside the window are detected', () =>
 			account,
 			window: { from: '2026-09', monthsAhead: 1 },
 			events: {
-				'szczegoly/1': { m: '2026-09', f: fingerprint(entry('szczegoly/1', '2026-09-18')), s: {} },
-				'szczegoly/2': { m: '2026-09', f: 'stale', s: {} },
-				'szczegoly/3': { m: '2026-09', f: 'gone', s: {} },
-				'szczegoly/4': { m: '2026-12', f: 'outside', s: {} },
+				'szczegoly/1': { m: '2026-09', f: fingerprint(entry('szczegoly/1', '2026-09-18')), s: snap('2026-09-18') },
+				'szczegoly/2': { m: '2026-09', f: 'stale', s: snap('2026-09-18') },
+				'szczegoly/3': { m: '2026-09', f: 'gone', s: snap('2026-09-10') },
+				'szczegoly/4': { m: '2026-12', f: 'outside', s: snap('2026-12-01') },
 			},
 		},
 	};
@@ -123,7 +124,7 @@ test('switching accounts starts a new silent baseline', () => {
 			rev: 2,
 			account,
 			window: { from: '2026-09', monthsAhead: 1 },
-			events: { 'szczegoly/1': { m: '2026-09', f: 'x', s: {} } },
+			events: { 'szczegoly/1': { m: '2026-09', f: 'x', s: snap('2026-09-18') } },
 		},
 	};
 	const plan = planCalendarPoll(
@@ -146,7 +147,7 @@ test('hydration is capped and ordered so a backlog converges deterministically',
 			rev: 0,
 			account,
 			window: { from: '2026-09', monthsAhead: 0 },
-			events: { 'szczegoly/000': { m: '2026-09', f: 'x', s: {} } },
+			events: { 'szczegoly/000': { m: '2026-09', f: 'x', s: snap('2026-09-18') } },
 		},
 	};
 	const plan = planCalendarPoll(state, account, window('2026-09', 0, ['2026-09']), entries);
@@ -166,4 +167,64 @@ test('corrupt stored state fails instead of silently resetting history', () => {
 			() => planCalendarPoll(broken, account, window('2026-09', 1, ['2026-09', '2026-10']), []),
 			{ message: /Zapisana historia terminarza jest nieprawidłowa/ },
 		);
+});
+
+test('a stored snapshot missing or mistyping date or text is rejected as corrupt', () => {
+	const brokenSnapshots = [
+		{}, // missing both date and text
+		{ text: 'Matematyka' }, // missing date
+		{ date: '2026-09-18' }, // missing text
+		{ date: 20260918, text: 'Matematyka' }, // date not a string
+		{ date: '2026-13-01', text: 'Matematyka' }, // date fails the calendar-shaped regex
+		{ date: '2026-09-18', text: 42 }, // text not a string
+	];
+	for (const s of brokenSnapshots) {
+		const state = {
+			librusCalendar: {
+				version: 1,
+				rev: 0,
+				account,
+				window: { from: '2026-09', monthsAhead: 1 },
+				events: { 'szczegoly/1': { m: '2026-09', f: 'x', s } },
+			},
+		};
+		assert.throws(
+			() => planCalendarPoll(state, account, window('2026-09', 1, ['2026-09', '2026-10']), []),
+			{ message: /Zapisana historia terminarza jest nieprawidłowa/ },
+		);
+	}
+});
+
+test('a valid stored snapshot with date and text still passes validation', () => {
+	const state = {
+		librusCalendar: {
+			version: 1,
+			rev: 0,
+			account,
+			window: { from: '2026-09', monthsAhead: 1 },
+			events: { 'szczegoly/1': { m: '2026-09', f: 'x', s: snap('2026-09-18', 'Matematyka') } },
+		},
+	};
+	const plan = planCalendarPoll(state, account, window('2026-09', 1, ['2026-09', '2026-10']), []);
+	assert.equal(plan.baseline, false);
+});
+
+test('planCalendarPoll hands out a copy of stored events, never the live state reference', () => {
+	const state = {
+		librusCalendar: {
+			version: 1,
+			rev: 4,
+			account,
+			window: { from: '2026-09', monthsAhead: 1 },
+			events: {
+				'szczegoly/1': { m: '2026-09', f: 'x', s: snap('2026-09-18') },
+			},
+		},
+	};
+	const plan = planCalendarPoll(state, account, window('2026-09', 1, ['2026-09', '2026-10']), []);
+	assert.notEqual(plan.stored, state.librusCalendar.events);
+	plan.stored['szczegoly/2'] = { m: '2026-09', f: 'injected', s: snap('2026-09-20') };
+	delete plan.stored['szczegoly/1'];
+	assert.deepEqual(Object.keys(state.librusCalendar.events), ['szczegoly/1']);
+	assert.equal(state.librusCalendar.events['szczegoly/2'], undefined);
 });

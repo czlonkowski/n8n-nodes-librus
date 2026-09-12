@@ -87,6 +87,8 @@ function validWindow(value: unknown): boolean {
 	);
 }
 
+const DATE_PATTERN = /^\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])$/;
+
 function validEvents(value: unknown): boolean {
 	if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
 	const events = value as Record<string, unknown>;
@@ -94,14 +96,17 @@ function validEvents(value: unknown): boolean {
 	return Object.values(events).every((record) => {
 		if (typeof record !== 'object' || record === null || Array.isArray(record)) return false;
 		const stored = record as Record<string, unknown>;
-		return (
-			typeof stored.m === 'string' &&
-			typeof stored.f === 'string' &&
-			!!stored.f &&
-			typeof stored.s === 'object' &&
-			stored.s !== null &&
-			!Array.isArray(stored.s)
-		);
+		if (
+			typeof stored.m !== 'string' ||
+			typeof stored.f !== 'string' ||
+			!stored.f ||
+			typeof stored.s !== 'object' ||
+			stored.s === null ||
+			Array.isArray(stored.s)
+		)
+			return false;
+		const snapshot = stored.s as Record<string, unknown>;
+		return typeof snapshot.date === 'string' && DATE_PATTERN.test(snapshot.date) && typeof snapshot.text === 'string';
 	});
 }
 
@@ -132,7 +137,7 @@ export function planCalendarPoll(
 			throw new LibrusError('CALENDAR_STATE_INVALID');
 		rev = previous.rev as number;
 		if (previous.account === account) {
-			stored = previous.events as Record<string, StoredEvent>;
+			stored = { ...(previous.events as Record<string, StoredEvent>) };
 			baseline = false;
 			const saved = previous.window as { from: string; monthsAhead: number };
 			storedAhead = saved.monthsAhead;
