@@ -21,3 +21,13 @@ Do not store cookies in workflow static data or node output when adding session 
 - In a deliberately activated test workflow with no outbound action, confirm the first automatic poll emits no old messages; one newly received message emits once, even if read before polling. Do not send test messages to others without authorization.
 - Restart the test instance with persistent storage; confirm no replay. Exercise downstream-failure recovery with synthetic data and execution retry.
 - Check account-switch baseline, an inbox beyond the page cap, and ordinary session/browser effects before enabling unattended use.
+
+## Calendar trigger acceptance
+
+1. Confirm the month form: POST `rok`/`miesiac` returns the requested month, and that the grid renders every day of that month with no adjacent-month days. A `numery dni miesiąca` failure means the assumption is wrong — record the shape, do not paste private content.
+2. Record the real `Rodzaj` vocabulary from the emitted output so the free-text filter can become a multi-select later.
+3. Open a `szczegoly_wolne` entry and confirm its detail page parses; note whether it redirects.
+4. Confirm the first automatic poll emits nothing, a newly added event emits once, an edited description and a moved date each emit one change, and a removed event emits one removal.
+5. Restart the instance with persistent storage and confirm no replay.
+6. Confirm calendar polling does not disturb the Librus web UI, and that the message trigger on the same account is unaffected.
+7. Measure a safe poll interval before unattended use; 15 minutes or slower is the starting point.

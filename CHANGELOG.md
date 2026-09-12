@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.0 — 2026-09-12
+
+- Add two calendar events, Nowe wydarzenie w terminarzu and Zmiana wydarzenia w terminarzu, to the shared Librus Trigger node; removals and cancellations are reported on the change event, not a separate one.
+- Scan the current month plus a configurable number of months ahead through a credential-free POST to the Librus terminarz month form, guarded by a day-grid completeness check so a malformed or mis-rendered grid fails the poll instead of silently mis-dating or dropping events.
+- Fetch event detail pages only for new or changed entries, hydrating up to 50 per poll and deferring the remainder to later polls without failing or losing already-detected changes.
+- Record calendar discovery history under its own librusCalendar state key, separate from the existing message history, with an independent silent baseline, window pruning and account-change reset.
+- Add a free-text, case-insensitive event-kind filter that always passes an unknown kind, so an unrecognized or not-yet-hydrated event type is never silently dropped.
+- Leave message behaviour, the newMessage event and its defaults unchanged for existing workflows.
+
 ## 0.1.5 — 2026-09-08
 
 - Add the author’s standard AiAdvisors automation services CTA in Polish to the README.
