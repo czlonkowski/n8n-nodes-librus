@@ -12,6 +12,9 @@ const messages: Record<string, string> = {
 	SERVICE_ERROR: 'Librus jest niedostępny lub zwrócił nieoczekiwany status HTTP.',
 	SCAN_INCOMPLETE:
 		'Nie udało się sprawdzić całej skrzynki w wyznaczonych granicach. Zwiększ Maksymalną liczbę stron lub ogranicz liczbę pobieranych wiadomości.',
+	// The calendar path has no page limit to raise; its only lever is the month window.
+	CALENDAR_SCAN_INCOMPLETE:
+		'Nie udało się sprawdzić całego terminarza w wyznaczonych granicach. Zmniejsz Liczbę miesięcy do przodu i spróbuj ponownie.',
 	FULL_CONTENT_LIMIT:
 		'W jednym wykonaniu można pobrać pełną treść maksymalnie 50 wiadomości. Wyłącz Pobierz wszystkie i ustaw Limit na 50 lub mniej.',
 	INVALID_OPTIONS: 'Nieprawidłowe dane logowania do Librusa lub ustawienia pobierania wiadomości.',
@@ -22,7 +25,7 @@ const messages: Record<string, string> = {
 	CALENDAR_STATE_INVALID:
 		'Zapisana historia terminarza jest nieprawidłowa. Utwórz ponownie węzeł z wydarzeniem terminarza, aby zapamiętać aktualny kalendarz.',
 	CALENDAR_STATE_LIMIT:
-		'Osiągnięto limit historii 2000 wydarzeń terminarza. Zmniejsz Liczbę miesięcy wprzód lub utwórz węzeł ponownie, aby zapamiętać aktualny kalendarz.',
+		'Osiągnięto limit historii 2000 wydarzeń terminarza. Zmniejsz Liczbę miesięcy do przodu lub utwórz węzeł ponownie, aby zapamiętać aktualny kalendarz.',
 };
 export type AuthStage =
 	| 'rozpoczęcie logowania'

@@ -757,9 +757,12 @@ test('a month form redirected anywhere else is never followed or replayed', asyn
 		...auth(),
 		redirect('https://synergia.librus.pl/terminarz/inny'),
 	]);
-	await assert.rejects(client.getCalendar({ months: ['2026-09'] }, () => []), {
-		message: /Walidacja: przekierowanie POST/,
-	});
+	await assert.rejects(
+		client.getCalendar({ months: ['2026-09'] }, () => []),
+		{
+			message: /Walidacja: przekierowanie POST/,
+		},
+	);
 	assert.equal(calls.filter((call) => call.url.endsWith('/terminarz/inny')).length, 0);
 });
 
@@ -772,33 +775,44 @@ test('a month form redirected to the login page reports an expired session', asy
 		...auth(),
 		redirect('https://synergia.librus.pl/loguj'),
 	]);
-	await assert.rejects(client.getCalendar({ months: ['2026-09'] }, () => []), {
-		message: /Sesja Librusa wygasła/,
-	});
+	await assert.rejects(
+		client.getCalendar({ months: ['2026-09'] }, () => []),
+		{
+			message: /Sesja Librusa wygasła/,
+		},
+	);
 });
 
 test('a login form returned instead of the grid reports an expired session', async () => {
-	const form =
-		'<form><input name="login" /><input name="pass" type="password" /></form>';
+	const form = '<form><input name="login" /><input name="pass" type="password" /></form>';
 	const { client } = setup([...auth(), ok(form), ...auth(), ok(form)]);
-	await assert.rejects(client.getCalendar({ months: ['2026-09'] }, () => []), {
-		message: /Sesja Librusa wygasła/,
-	});
+	await assert.rejects(
+		client.getCalendar({ months: ['2026-09'] }, () => []),
+		{
+			message: /Sesja Librusa wygasła/,
+		},
+	);
 });
 
 test('a broken grid fails with the month in the diagnostics and never returns an empty calendar', async () => {
 	const { client } = setup([...auth(), ok('<html><body>Awaria</body></html>')]);
-	await assert.rejects(client.getCalendar({ months: ['2026-09'] }, () => []), {
-		message: /Walidacja: siatka terminarza.*Miesiąc terminarza: 2026-09/s,
-	});
+	await assert.rejects(
+		client.getCalendar({ months: ['2026-09'] }, () => []),
+		{
+			message: /Walidacja: siatka terminarza.*Miesiąc terminarza: 2026-09/s,
+		},
+	);
 });
 
 test('rejects malformed month windows before touching the network', async () => {
 	const { client } = setup([]);
 	for (const months of [[], ['2026-9'], ['2026-13'], Array(8).fill('2026-09'), 'no'])
-		await assert.rejects(client.getCalendar({ months }, () => []), {
-			message: /Nieprawidłowe dane logowania do Librusa/,
-		});
+		await assert.rejects(
+			client.getCalendar({ months }, () => []),
+			{
+				message: /Nieprawidłowe dane logowania do Librusa/,
+			},
+		);
 });
 
 const detailPage = (rows) =>
@@ -820,10 +834,7 @@ test('hydrates only the selected keys and reports the raw Rodzaj', async () => {
 	const result = await client.getCalendar({ months: ['2026-09'] }, () => ['szczegoly/11']);
 	assert.equal(result.details.get('szczegoly/11').rodzaj, 'Sprawdzian');
 	assert.equal(result.details.has('szczegoly/12'), false);
-	assert.equal(
-		calls.at(-1).url,
-		'https://synergia.librus.pl/terminarz/szczegoly/11',
-	);
+	assert.equal(calls.at(-1).url, 'https://synergia.librus.pl/terminarz/szczegoly/11');
 });
 
 test('a detail page that is gone is left unresolved so the next poll retries it', async () => {
@@ -850,13 +861,107 @@ test('an entry with no detail link resolves to null so it can still be committed
 
 test('hydration is bounded, and unhydrated keys stay unresolved', async () => {
 	const rows = Object.fromEntries(
-		Array.from({ length: 30 }, (_, day) => [day + 1, entryRow(day + 1, 'Test') + entryRow(day + 101, 'Test')]),
+		Array.from({ length: 30 }, (_, day) => [
+			day + 1,
+			entryRow(day + 1, 'Test') + entryRow(day + 101, 'Test'),
+		]),
 	);
-	const { client } = setup([...auth(), ok(grid(2026, 9, rows)), ...Array(50).fill(ok(sampleDetail))]);
+	const { client } = setup([
+		...auth(),
+		ok(grid(2026, 9, rows)),
+		...Array(50).fill(ok(sampleDetail)),
+	]);
 	const result = await client.getCalendar({ months: ['2026-09'] }, (entries) =>
 		entries.map((entry) => entry.key),
 	);
 	assert.equal(result.details.size, 50);
+});
+
+test('link-less entries resolve to null without consuming a detail slot', async () => {
+	// 50 link-less rows come first, then three linked ones. A budget that counted the
+	// synthetic keys would spend every slot before reaching a single real detail page.
+	const rows = Object.fromEntries([
+		...Array.from({ length: 25 }, (_, i) => [
+			i + 1,
+			`<tr><td>Dzień wolny ${i + 1}a</td></tr><tr><td>Dzień wolny ${i + 1}b</td></tr>`,
+		]),
+		...Array.from({ length: 3 }, (_, i) => [26 + i, entryRow(200 + i, 'Matematyka')]),
+	]);
+	const { client, calls } = setup([
+		...auth(),
+		ok(grid(2026, 9, rows)),
+		...Array(3).fill(ok(sampleDetail)),
+	]);
+	const result = await client.getCalendar({ months: ['2026-09'] }, (entries) =>
+		entries.map((entry) => entry.key),
+	);
+	assert.equal(result.details.size, 53);
+	assert.equal(calls.filter((call) => call.url.includes('/terminarz/szczegoly/')).length, 3);
+	for (const id of [200, 201, 202])
+		assert.equal(result.details.get(`szczegoly/${id}`).rodzaj, 'Sprawdzian');
+});
+
+test('a session expiry late in hydration leaves the retry a full request budget', async () => {
+	// A full window costs about 8 (login) + 7 (months) + 50 (details) requests. On one
+	// shared counter the second attempt would run out well before finishing.
+	const months = Array.from({ length: 7 }, (_, i) => `2026-0${i + 1}`);
+	const rows = Object.fromEntries(
+		Array.from({ length: 25 }, (_, i) => [
+			i + 1,
+			entryRow(i + 1, 'Matematyka') + entryRow(i + 101, 'Fizyka'),
+		]),
+	);
+	const january = () => [
+		ok(grid(2026, 1, rows)),
+		...months.slice(1).map((month, i) => ok(grid(2026, i + 2, {}))),
+	];
+	const loginForm = '<form><input name="login" /><input name="pass" type="password" /></form>';
+	const { client, calls } = setup([
+		...auth(),
+		...january(),
+		...Array(49).fill(ok(sampleDetail)),
+		ok(loginForm), // the 50th detail page comes back as a login form
+		...auth(),
+		...january(),
+		...Array(50).fill(ok(sampleDetail)),
+	]);
+	const result = await client.getCalendar({ months }, (entries) =>
+		entries.map((entry) => entry.key),
+	);
+	assert.equal(result.details.size, 50);
+	assert.equal(calls.length, 130); // both attempts ran to completion: 65 requests each
+});
+
+test('an exhausted calendar budget names the month window, not the inbox page limit', async () => {
+	const months = Array.from({ length: 7 }, (_, i) => `2026-0${i + 1}`);
+	const rows = Object.fromEntries(
+		Array.from({ length: 25 }, (_, i) => [
+			i + 1,
+			entryRow(i + 1, 'Matematyka') + entryRow(i + 101, 'Fizyka'),
+		]),
+	);
+	// Every detail page takes a redirect hop, so hydration costs two requests per entry
+	// and the 100-request cap is reached partway through.
+	const { client } = setup([
+		...auth(),
+		ok(grid(2026, 1, rows)),
+		...months.slice(1).map((month, i) => ok(grid(2026, i + 2, {}))),
+		...Array(50)
+			.fill(null)
+			.flatMap(() => [
+				redirect('https://synergia.librus.pl/terminarz/szczegoly/1'),
+				ok(sampleDetail),
+			]),
+	]);
+	await assert.rejects(
+		client.getCalendar({ months }, (entries) => entries.map((entry) => entry.key)),
+		(error) => {
+			assert.equal(error.code, 'CALENDAR_SCAN_INCOMPLETE');
+			assert.match(error.message, /Zmniejsz Liczbę miesięcy do przodu/);
+			assert.doesNotMatch(error.message, /liczbę stron/i);
+			return true;
+		},
+	);
 });
 
 test('an expired session during hydration restarts scan and selection once', async () => {

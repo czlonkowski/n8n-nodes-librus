@@ -240,6 +240,12 @@ export class LibrusClient {
 	private jar = new CookieJar();
 	private deadline = 0;
 	private requests = 0;
+	/**
+	 * Which exhausted-budget message the current operation should raise. The message
+	 * names the parameter the user can actually turn down, and the calendar events have
+	 * no "Maksymalna liczba stron".
+	 */
+	private budgetCode: 'SCAN_INCOMPLETE' | 'CALENDAR_SCAN_INCOMPLETE' = 'SCAN_INCOMPLETE';
 	constructor(
 		private readonly transport: Transport,
 		private readonly login: Login,
@@ -249,8 +255,12 @@ export class LibrusClient {
 		let url = checkedUrl(value);
 		for (let hop = 0; hop <= 10; hop++) {
 			if (++this.requests > 100 || Date.now() >= this.deadline)
-				throw new LibrusError('SCAN_INCOMPLETE');
-			if (body !== undefined && !authUrl(url) && !allowedPostUrls.has(`${url.origin}${url.pathname}`))
+				throw new LibrusError(this.budgetCode);
+			if (
+				body !== undefined &&
+				!authUrl(url) &&
+				!allowedPostUrls.has(`${url.origin}${url.pathname}`)
+			)
 				throw new LibrusError('UNSAFE_URL');
 			const headers: Record<string, string> = {
 				Accept: 'application/json, text/html;q=0.9',
@@ -260,7 +270,7 @@ export class LibrusClient {
 			if (cookie) headers.Cookie = cookie;
 			if (body !== undefined) headers['Content-Type'] = 'application/x-www-form-urlencoded';
 			const remaining = this.deadline - Date.now();
-			if (remaining <= 0) throw new LibrusError('SCAN_INCOMPLETE');
+			if (remaining <= 0) throw new LibrusError(this.budgetCode);
 			let response: Response;
 			try {
 				response = await this.transport({
@@ -386,6 +396,7 @@ export class LibrusClient {
 				options.contentSource !== 'full')
 		)
 			throw new LibrusError('INVALID_OPTIONS');
+		this.budgetCode = 'SCAN_INCOMPLETE';
 		this.deadline = Date.now() + 120000;
 		this.requests = 0;
 		await this.authenticate();
@@ -422,6 +433,7 @@ export class LibrusClient {
 			!/^[A-Za-z0-9_-]+$/.test(messageId)
 		)
 			throw new LibrusError('INVALID_OPTIONS');
+		this.budgetCode = 'SCAN_INCOMPLETE';
 		this.deadline = Date.now() + 120000;
 		this.requests = 0;
 		await this.authenticate();
@@ -565,6 +577,7 @@ export class LibrusClient {
 			options.months.some((month) => !/^\d{4}-(?:0[1-9]|1[0-2])$/.test(month))
 		)
 			throw new LibrusError('INVALID_OPTIONS');
+		this.budgetCode = 'CALENDAR_SCAN_INCOMPLETE';
 		this.deadline = Date.now() + 120000;
 		this.requests = 0;
 		await this.authenticate();
@@ -580,22 +593,34 @@ export class LibrusClient {
 				const selected = select(entries);
 				if (!Array.isArray(selected)) throw new LibrusError('INVALID_OPTIONS');
 				const details = new Map<string, CalendarDetail | null>();
-				// Bounded independently of the caller. Keys left out stay unresolved,
-				// which the state module treats as "retry on the next poll".
-				for (const key of selected.slice(0, MAX_DETAILS)) {
+				// A link-less (synthetic-key) entry has nothing to fetch, so it is resolved
+				// as null here and never consumes one of the MAX_DETAILS slots — a real
+				// backlog of fetchable entries drains that much faster.
+				const fetchable: { key: string; route: 'szczegoly' | 'szczegoly_wolne'; id: string }[] = [];
+				for (const key of selected) {
 					const entry = known.get(key);
 					if (!entry) continue;
 					if (!entry.route || !entry.eventId) {
 						details.set(key, null);
 						continue;
 					}
-					const detail = await this.eventDetail(entry.route, entry.eventId);
+					fetchable.push({ key, route: entry.route, id: entry.eventId });
+				}
+				// Bounded independently of the caller. Keys left out stay unresolved,
+				// which the state module treats as "retry on the next poll".
+				for (const { key, route, id } of fetchable.slice(0, MAX_DETAILS)) {
+					const detail = await this.eventDetail(route, id);
 					if (detail !== null) details.set(key, detail);
 				}
 				return { entries, details };
 			} catch (error) {
 				if (!(error instanceof LibrusError) || error.code !== 'SESSION_EXPIRED' || attempt === 1)
 					throw error;
+				// A full window costs roughly 8 (login) + 7 (months) + 50 (details) requests,
+				// so a session expiry late in hydration would leave the retry unable to
+				// finish on a shared counter. Each attempt gets its own request budget; the
+				// 120-second deadline, untouched, still bounds the operation as a whole.
+				this.requests = 0;
 				await this.authenticate();
 			}
 		}
