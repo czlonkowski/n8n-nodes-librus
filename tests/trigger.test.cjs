@@ -290,3 +290,183 @@ test('automatic polling baselines a tagged 19th message and emits a new tagged m
 	assert.equal(await trigger.poll.call(ctx), null);
 	assert.equal(pending.length, 0);
 });
+
+const { monthWindow } = require('../dist/nodes/Librus/calendarState');
+
+function calendarContext(state, event, overrides = {}, manual = false) {
+	const parameters = { event, monthsAhead: 1, eventTypes: '', ...overrides };
+	return {
+		...context(state, manual),
+		getNodeParameter: (name) => parameters[name],
+		getMode: () => (manual ? 'manual' : 'trigger'),
+		getWorkflowStaticData: () => state,
+	};
+}
+const calendarEntry = (key, date, text = 'Matematyka') => ({
+	key,
+	route: key.startsWith('hash/') ? null : key.split('/')[0],
+	eventId: key.startsWith('hash/') ? null : key.split('/')[1],
+	date,
+	subject: text,
+	teacher: 'Jan Kowalski',
+	description: 'Zakres',
+	lessonNumber: 3,
+	hour: '10:45',
+	text,
+});
+const calendarDetail = (rodzaj) => ({
+	fields: { Rodzaj: rodzaj, Sala: '12' },
+	rodzaj,
+	room: '12',
+	addedAt: '2026-09-01 12:03:00',
+	teacher: 'Jan Kowalski',
+	subject: 'Matematyka',
+	description: 'Zakres',
+	lessonNumber: 3,
+	date: '2026-09-18',
+});
+/** Replaces the network by driving getCalendar's selector with fixed entries. */
+function stubCalendar(entries, details) {
+	const original = LibrusClient.prototype.getCalendar;
+	LibrusClient.prototype.getCalendar = async function (options, select) {
+		select(entries);
+		return { entries, details };
+	};
+	return () => {
+		LibrusClient.prototype.getCalendar = original;
+	};
+}
+
+test('the node registers three events and keeps newMessage as the default', () => {
+	const trigger = new LibrusTrigger();
+	const event = trigger.description.properties.find((property) => property.name === 'event');
+	assert.equal(event.default, 'newMessage');
+	assert.deepEqual(
+		event.options.map((option) => option.value),
+		['newMessage', 'newCalendarEvent', 'changedCalendarEvent'],
+	);
+	const calendarOnly = trigger.description.properties.filter(
+		(property) => property.name === 'monthsAhead' || property.name === 'eventTypes',
+	);
+	assert.equal(calendarOnly.length, 2);
+	for (const property of calendarOnly)
+		assert.deepEqual(property.displayOptions.show.event, [
+			'newCalendarEvent',
+			'changedCalendarEvent',
+		]);
+});
+
+test('the first calendar poll is a silent baseline and the next one emits additions only', async () => {
+	const state = {};
+	const trigger = new LibrusTrigger();
+	let restore = stubCalendar([calendarEntry('szczegoly/1', '2026-09-18')], new Map());
+	assert.equal(await trigger.poll.call(calendarContext(state, 'newCalendarEvent')), null);
+	restore();
+	restore = stubCalendar(
+		[calendarEntry('szczegoly/1', '2026-09-18'), calendarEntry('szczegoly/2', '2026-09-20')],
+		new Map([['szczegoly/2', calendarDetail('Kartkówka')]]),
+	);
+	const result = await trigger.poll.call(calendarContext(state, 'newCalendarEvent'));
+	restore();
+	assert.equal(result[0].length, 1);
+	assert.deepEqual(
+		{
+			changeType: result[0][0].json.changeType,
+			eventKey: result[0][0].json.eventKey,
+			rodzaj: result[0][0].json.rodzaj,
+			room: result[0][0].json.room,
+			details: result[0][0].json.details,
+		},
+		{
+			changeType: 'new',
+			eventKey: 'szczegoly/2',
+			rodzaj: 'Kartkówka',
+			room: '12',
+			details: { Rodzaj: 'Kartkówka', Sala: '12' },
+		},
+	);
+});
+
+test('the change event emits edits and disappearances, and never additions', async () => {
+	const state = {};
+	const trigger = new LibrusTrigger();
+	let restore = stubCalendar(
+		[calendarEntry('szczegoly/1', '2026-09-18'), calendarEntry('szczegoly/2', '2026-09-20')],
+		new Map(),
+	);
+	await trigger.poll.call(calendarContext(state, 'changedCalendarEvent'));
+	restore();
+	restore = stubCalendar(
+		[calendarEntry('szczegoly/1', '2026-09-25'), calendarEntry('szczegoly/3', '2026-09-27')],
+		new Map([
+			['szczegoly/1', calendarDetail('Sprawdzian')],
+			['szczegoly/3', calendarDetail('Wycieczka')],
+		]),
+	);
+	const result = await trigger.poll.call(calendarContext(state, 'changedCalendarEvent'));
+	restore();
+	assert.deepEqual(
+		result[0].map((item) => [item.json.changeType, item.json.eventKey]).sort(),
+		[
+			['changed', 'szczegoly/1'],
+			['removed', 'szczegoly/2'],
+		].sort(),
+	);
+});
+
+test('the type filter matches case-insensitively and never drops an unknown kind', async () => {
+	const state = {};
+	const trigger = new LibrusTrigger();
+	let restore = stubCalendar([], new Map());
+	await trigger.poll.call(calendarContext(state, 'newCalendarEvent'));
+	restore();
+	restore = stubCalendar(
+		[
+			calendarEntry('szczegoly/1', '2026-09-18'),
+			calendarEntry('szczegoly/2', '2026-09-19'),
+			calendarEntry('szczegoly/3', '2026-09-20'),
+		],
+		new Map([
+			['szczegoly/1', calendarDetail('Sprawdzian')],
+			['szczegoly/2', calendarDetail('Wycieczka')],
+			['szczegoly/3', null],
+		]),
+	);
+	const result = await trigger.poll.call(
+		calendarContext(state, 'newCalendarEvent', { eventTypes: ' SPRAWDZIAN , kartkówka ' }),
+	);
+	restore();
+	assert.deepEqual(result[0].map((item) => item.json.eventKey).sort(), [
+		'szczegoly/1',
+		'szczegoly/3',
+	]);
+});
+
+test('a manual test returns a bounded sample and never touches history', async () => {
+	const state = {};
+	const trigger = new LibrusTrigger();
+	const entries = Array.from({ length: 9 }, (_, i) =>
+		calendarEntry(`szczegoly/${i}`, '2026-09-18'),
+	);
+	const restore = stubCalendar(entries, new Map());
+	const result = await trigger.poll.call(calendarContext(state, 'newCalendarEvent', {}, true));
+	restore();
+	assert.equal(result[0].length, 5);
+	assert.equal(result[0][0].json.changeType, 'sample');
+	assert.deepEqual(state, {});
+});
+
+test('the message event keeps its existing behaviour and its own state key', async () => {
+	const state = {
+		librusCalendar: {
+			version: 1,
+			rev: 3,
+			account,
+			window: { from: '2026-09', monthsAhead: 1 },
+			events: {},
+		},
+	};
+	assert.deepEqual(selectNewMessages(state, account, [message('a')]), []);
+	assert.equal(state.librus.seenIds.length, 1);
+	assert.equal(state.librusCalendar.rev, 3);
+});
