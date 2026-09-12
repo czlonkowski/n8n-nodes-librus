@@ -27,7 +27,7 @@ Unverified community observations (RustySnek/librus-apix, Mati365/librus-api); n
 
 - `nodes/Librus/terminarz.ts` — pure parser, no network: `parseMonth(html, year, month)` and `parseEventDetail(html)`. Fully covered by HTML fixtures.
 - `nodes/Librus/LibrusClient.ts` — `getCalendar(options)`, private `monthPage(year, month)` and `eventDetail(route, id)`; the credential-free POST allowlist; existing single session-recovery behaviour.
-- `nodes/Librus/calendarState.ts` — `selectCalendarChanges(...)`, mirroring `pollState.ts`: versioned state, hard limits, no silent recovery from corrupt state.
+- `nodes/Librus/calendarState.ts` — `planCalendarPoll(...)` and `commitCalendarPoll(...)`, the diff-before-hydration and commit-after-hydration halves of the poll, mirroring `pollState.ts`: versioned state, hard limits, no silent recovery from corrupt state.
 - `nodes/Librus/LibrusTrigger.node.ts` — `event` becomes a visible option list with three values; message and calendar parameters are separated by `displayOptions`. Existing workflows stay on `newMessage`.
 
 ## Transport boundary

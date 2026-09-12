@@ -14,7 +14,11 @@
 - Silence only the months a larger window actually added, so months that the passage of time had already brought into range still emit instead of being baselined away.
 - Skip entries with no detail link before applying the 50-page hydration budget, so a real backlog of linked events drains faster.
 - Reject stored calendar records whose month is malformed, which would otherwise be neither prunable nor removable.
+- Reject a calendar detail response whose final address is not the requested event page, so a redirect to another Synergia page can no longer be parsed as event details.
+- Stop detail hydration on the remaining request budget instead of failing the whole poll, so redirected detail pages leave a partial, committed scan that the next poll finishes rather than a backlog retried forever.
+- Report invalid calendar settings with their own message naming Liczba miesięcy do przodu instead of the message-fetching settings, which the calendar events do not have.
 - Rename the parameter label to Liczba miesięcy do przodu, fall back to Nowa wiadomość in the node subtitle for an unexpected event value, and keep internal planning documents out of the published npm package.
+- Describe both message and calendar automation in the package description.
 
 ## 0.1.5 — 2026-09-08
 

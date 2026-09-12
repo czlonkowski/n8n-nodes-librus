@@ -86,4 +86,6 @@ An exhausted budget on the calendar path raises `CALENDAR_SCAN_INCOMPLETE`, whos
 
 `Rodzaj` (event kind) is free text read only from the detail page, so an entry baselined or left unresolved without hydration has no known kind. The type filter (`eventTypes`, comma-separated, case-insensitive) always lets an entry with an unknown `rodzaj` through, on the same reasoning as the mass-removal guard: a missed cancellation is worse than one extra item reaching the workflow.
 
+The manual execution path deliberately does not apply that filter to its sample of up to five current-month entries, unlike the automatic path. The `Rodzaj` vocabulary is unverified, and the manual test is exactly how a user discovers the real values before filling the filter in: filtering the sample would hide the values it exists to reveal, and a narrow filter would return an empty sample that reads as a broken connection. The inconsistency is intentional and is stated in the node's calendar notice and in the README.
+
 None of this — the POST target, the grid markup, the detail-page shape, the `Rodzaj` vocabulary, or whether polling disturbs the Librus UI — is live-verified. Every check performed so far is against offline HTML fixtures written from source inspection of third-party unofficial clients, not against a real Librus account.

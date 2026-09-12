@@ -39,6 +39,9 @@ async function pollCalendar(
 ): Promise<INodeExecutionData[][] | null> {
 	const types = parseTypes(context.getNodeParameter('eventTypes') as string);
 	if (manual) {
+		// The sample deliberately ignores `types`: the Rodzaj vocabulary is unverified, so
+		// the manual test is how a user reads the real values, and a narrow filter would
+		// return an empty sample that looks like a broken connection. Do not "fix" this.
 		const window = monthWindow(new Date(), 0);
 		const scan = await client.getCalendar({ months: window.months }, (entries) =>
 			entries.slice(0, 5).map((entry) => entry.key),
@@ -168,7 +171,7 @@ export class LibrusTrigger implements INodeType {
 			},
 			{
 				displayName:
-					'Pierwsze automatyczne sprawdzenie zapamiętuje obecny terminarz bez uruchamiania workflow dla istniejących wydarzeń. Test ręczny zwraca do pięciu wydarzeń z bieżącego miesiąca i nie zmienia historii. Ustaw harmonogram (Poll Times) na co najmniej 15 minut.',
+					'Pierwsze automatyczne sprawdzenie zapamiętuje obecny terminarz bez uruchamiania workflow dla istniejących wydarzeń. Test ręczny zwraca do pięciu wydarzeń z bieżącego miesiąca i nie zmienia historii; celowo pomija filtr Rodzaje wydarzeń, żeby dało się odczytać z wyniku prawdziwe wartości pola rodzaj. Ustaw harmonogram (Poll Times) na co najmniej 15 minut.',
 				name: 'calendarBaselineNotice',
 				type: 'notice',
 				default: '',

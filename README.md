@@ -73,7 +73,7 @@ Przykładowy workflow: **Librus — Nowa wiadomość → Librus (Pobierz treść
 2. Ustaw **Liczba miesięcy do przodu** — ile miesięcy po bieżącym miesiącu sprawdzać (0–6, domyślnie 1). Każdy dodatkowy miesiąc to jedno kolejne zapytanie do Librusa; wydarzeń spoza tego zakresu węzeł nie wykryje.
 3. Opcjonalnie wypełnij **Rodzaje wydarzeń** listą rodzajów po przecinku (np. `Sprawdzian, Kartkówka`), dopasowywaną bez rozróżniania wielkości liter. Puste pole przepuszcza wszystkie wydarzenia. **Wydarzenie o nieznanym rodzaju zawsze przechodzi przez filtr** — dotyczy to też usuniętych wydarzeń, których szczegółów węzeł nie zdążył jeszcze pobrać — żeby filtr nigdy nie zgubił odwołanego sprawdzianu.
 4. Ustaw **Poll Times** na co najmniej 15 minut.
-5. Ręcznie przetestuj węzeł. Zwróci do pięciu najbliższych wydarzeń z bieżącego miesiąca jako próbkę (`changeType: "sample"`) i nie zmieni historii.
+5. Ręcznie przetestuj węzeł. Zwróci do pięciu najbliższych wydarzeń z bieżącego miesiąca jako próbkę (`changeType: "sample"`) i nie zmieni historii. Próbka **celowo pomija filtr Rodzaje wydarzeń** — dzięki temu odczytasz z wyniku prawdziwe wartości pola `rodzaj` i wpiszesz je do filtra, a wąski filtr nie zwróci pustej próbki wyglądającej na zepsute połączenie.
 6. Dodaj dalsze kroki i opublikuj/aktywuj workflow.
 
 **Pierwsze automatyczne sprawdzenie zapamiętuje obecny terminarz bez uruchamiania workflow dla już istniejących wydarzeń.** Kolejne sprawdzenia porównują terminarz z zapamiętanym stanem:
