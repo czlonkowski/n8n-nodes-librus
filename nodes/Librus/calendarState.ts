@@ -93,6 +93,37 @@ function validWindow(value: unknown): boolean {
 
 const DATE_PATTERN = /^\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])$/;
 
+/** Snapshot fields declared `string | null` in CalendarSnapshot. */
+const NULLABLE_STRINGS = [
+	'subject',
+	'teacher',
+	'description',
+	'hour',
+	'rodzaj',
+	'room',
+	'addedAt',
+] as const;
+
+/**
+ * Every field of the stored snapshot, checked against its declared type. Later code
+ * consumes these as the types `CalendarSnapshot` promises — the trigger's type filter
+ * calls `rodzaj.trim()` while emitting a removal, for one — so a record that is merely
+ * shaped like a snapshot would turn corrupt state into an unhandled TypeError inside an
+ * unattended poll instead of the CALENDAR_STATE_INVALID this module owes the user.
+ */
+function validSnapshot(value: unknown): boolean {
+	if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+	const snapshot = value as Record<string, unknown>;
+	if (typeof snapshot.date !== 'string' || !DATE_PATTERN.test(snapshot.date)) return false;
+	if (typeof snapshot.text !== 'string') return false;
+	for (const field of NULLABLE_STRINGS)
+		if (snapshot[field] !== null && typeof snapshot[field] !== 'string') return false;
+	return (
+		snapshot.lessonNumber === null ||
+		(Number.isSafeInteger(snapshot.lessonNumber) && (snapshot.lessonNumber as number) >= 0)
+	);
+}
+
 function validEvents(value: unknown): boolean {
 	if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
 	const events = value as Record<string, unknown>;
@@ -106,18 +137,10 @@ function validEvents(value: unknown): boolean {
 			typeof stored.m !== 'string' ||
 			!MONTH_PATTERN.test(stored.m) ||
 			typeof stored.f !== 'string' ||
-			!stored.f ||
-			typeof stored.s !== 'object' ||
-			stored.s === null ||
-			Array.isArray(stored.s)
+			!stored.f
 		)
 			return false;
-		const snapshot = stored.s as Record<string, unknown>;
-		return (
-			typeof snapshot.date === 'string' &&
-			DATE_PATTERN.test(snapshot.date) &&
-			typeof snapshot.text === 'string'
-		);
+		return validSnapshot(stored.s);
 	});
 }
 

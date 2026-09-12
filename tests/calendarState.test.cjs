@@ -23,7 +23,20 @@ const entry = (key, date, text = 'Matematyka') => ({
 	text,
 });
 const window = (from, monthsAhead, months) => ({ from, monthsAhead, months });
-const snap = (date = '2026-09-18', text = 'Matematyka') => ({ date, text });
+// A complete snapshot: `validEvents` checks every field against its declared type.
+const snap = (date = '2026-09-18', text = 'Matematyka', extra = {}) => ({
+	date,
+	text,
+	subject: text,
+	teacher: 'Jan Kowalski',
+	description: 'Zakres',
+	lessonNumber: 3,
+	hour: '10:45',
+	rodzaj: 'Sprawdzian',
+	room: '12',
+	addedAt: '2026-09-01 12:03:00',
+	...extra,
+});
 
 test('builds an inclusive month window and rejects impossible spans', () => {
 	assert.deepEqual(monthWindow(new Date(2026, 10, 15), 2), {
@@ -244,7 +257,7 @@ test('corrupt stored state fails instead of silently resetting history', () => {
 		);
 });
 
-test('a stored snapshot missing or mistyping date or text is rejected as corrupt', () => {
+test('a stored snapshot whose any field mistypes its declared type is rejected as corrupt', () => {
 	const brokenSnapshots = [
 		{}, // missing both date and text
 		{ text: 'Matematyka' }, // missing date
@@ -252,6 +265,17 @@ test('a stored snapshot missing or mistyping date or text is rejected as corrupt
 		{ date: 20260918, text: 'Matematyka' }, // date not a string
 		{ date: '2026-13-01', text: 'Matematyka' }, // date fails the calendar-shaped regex
 		{ date: '2026-09-18', text: 42 }, // text not a string
+		// Every other field is consumed as its declared type too: `rodzaj` reaches the
+		// trigger's type filter, which would call .trim() on a number mid-emission.
+		snap('2026-09-18', 'Matematyka', { rodzaj: 42 }),
+		snap('2026-09-18', 'Matematyka', { rodzaj: undefined }),
+		snap('2026-09-18', 'Matematyka', { lessonNumber: '3' }),
+		snap('2026-09-18', 'Matematyka', { lessonNumber: 1.5 }),
+		snap('2026-09-18', 'Matematyka', { lessonNumber: -1 }),
+		snap('2026-09-18', 'Matematyka', { room: {} }),
+		snap('2026-09-18', 'Matematyka', { subject: ['Matematyka'] }),
+		snap('2026-09-18', 'Matematyka', { addedAt: 1757683380000 }),
+		snap('2026-09-18', 'Matematyka', { hour: true }),
 	];
 	for (const s of brokenSnapshots) {
 		const state = {
@@ -270,18 +294,36 @@ test('a stored snapshot missing or mistyping date or text is rejected as corrupt
 	}
 });
 
-test('a valid stored snapshot with date and text still passes validation', () => {
+test('a fully populated stored snapshot, nulls included, still passes validation', () => {
 	const state = {
 		librusCalendar: {
 			version: 1,
 			rev: 0,
 			account,
 			window: { from: '2026-09', monthsAhead: 1 },
-			events: { 'szczegoly/1': { m: '2026-09', f: 'x', s: snap('2026-09-18', 'Matematyka') } },
+			events: {
+				'szczegoly/1': { m: '2026-09', f: 'x', s: snap('2026-09-18', 'Matematyka') },
+				// An entry baselined without hydration: every optional field is null.
+				'hash/abc': {
+					m: '2026-09',
+					f: 'y',
+					s: snap('2026-09-19', 'Dzień wolny', {
+						subject: null,
+						teacher: null,
+						description: null,
+						lessonNumber: null,
+						hour: null,
+						rodzaj: null,
+						room: null,
+						addedAt: null,
+					}),
+				},
+			},
 		},
 	};
 	const plan = planCalendarPoll(state, account, window('2026-09', 1, ['2026-09', '2026-10']), []);
 	assert.equal(plan.baseline, false);
+	assert.deepEqual(Object.keys(plan.stored), ['szczegoly/1', 'hash/abc']);
 });
 
 test('planCalendarPoll hands out a copy of stored events, never the live state reference', () => {
