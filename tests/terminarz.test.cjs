@@ -68,6 +68,17 @@ test('an incomplete or duplicated day grid fails rather than guessing dates', ()
 	});
 });
 
+test('a day block carrying two day numbers fails instead of using the first one', () => {
+	// Reading only the first marker would date every cell of this block to day 4.
+	const twoMarkers =
+		'<div class="kalendarz-dzien"><div class="kalendarz-numer-dnia">4</div>' +
+		'<div class="kalendarz-numer-dnia">5</div>' +
+		`<table>${cell(`onclick="location.href='/terminarz/szczegoly/123456'"`, 'Matematyka')}</table></div>`;
+	assert.throws(() => parseMonth(month(2026, 9, { 4: twoMarkers }), 2026, 9), {
+		message: /Walidacja: numery dni miesiąca/,
+	});
+});
+
 // Real Synergia pages are complete documents: the month grid is followed by a legend and
 // a footer, and the footer carries a value that moves between polls.
 const chrome = (stamp) =>

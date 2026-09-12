@@ -135,9 +135,16 @@ export function parseMonth(html: string, year: number, month: number): CalendarE
 	for (const block of blocks) {
 		const start = (block.index ?? 0) + block[0].length;
 		const chunk = html.slice(start, blockEnd(html, start));
-		const label =
-			/<div\b[^>]*class="[^"]*\bkalendarz-numer-dnia\b[^"]*"[^>]*>([\s\S]*?)<\/div>/i.exec(chunk);
-		const day = label ? Number(text(label[1])) : NaN;
+		// Exactly one day number per block. Taking the first of several would silently
+		// attribute the whole block's cells to it, which is the mis-dating this guard exists
+		// to prevent — a second marker means this is not the grid we think it is.
+		const labels = [
+			...chunk.matchAll(
+				/<div\b[^>]*class="[^"]*\bkalendarz-numer-dnia\b[^"]*"[^>]*>([\s\S]*?)<\/div>/gi,
+			),
+		];
+		if (labels.length !== 1) throw protocolError('numery dni miesiąca', labels.length);
+		const day = Number(text(labels[0][1]));
 		if (!Number.isInteger(day) || day < 1 || day > 31 || days.has(day))
 			throw protocolError('numery dni miesiąca', day);
 		days.add(day);
