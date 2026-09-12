@@ -7,6 +7,7 @@ import {
 	protocolError as baseProtocolError,
 	safeError,
 } from './errors';
+import { parseMonth, type CalendarDetail, type CalendarEntry } from './terminarz';
 export { LibrusError, safeError };
 
 export interface Request {
@@ -35,6 +36,14 @@ export interface Scan {
 	includeContent: boolean;
 	contentSource?: ContentSource;
 	readStatus?: ReadStatus;
+}
+export interface CalendarScan {
+	months: string[]; // 'YYYY-MM', 1..7 entries, ascending
+}
+export type CalendarSelect = (entries: CalendarEntry[]) => string[];
+export interface CalendarResult {
+	entries: CalendarEntry[];
+	details: Map<string, CalendarDetail | null>;
 }
 export interface Message {
 	messageId: string;
@@ -66,6 +75,7 @@ type ProtocolCheck =
 	| 'adres przekierowania'
 	| 'limit przekierowań'
 	| 'adres skrzynki'
+	| 'adres terminarza'
 	| 'obiekt odpowiedzi skrzynki'
 	| 'tablica wiadomości'
 	| 'liczba wiadomości na stronie';
@@ -78,6 +88,8 @@ const allowedHosts = new Set([
 	'api.librus.pl',
 	'wiadomosci.librus.pl',
 ]);
+// Credential-free POST targets. The password may still only leave through the OAuth route.
+const allowedPostUrls = new Set(['https://synergia.librus.pl/terminarz']);
 function checkedUrl(value: string, base?: string): URL {
 	let url: URL;
 	try {
@@ -236,7 +248,8 @@ export class LibrusClient {
 		for (let hop = 0; hop <= 10; hop++) {
 			if (++this.requests > 100 || Date.now() >= this.deadline)
 				throw new LibrusError('SCAN_INCOMPLETE');
-			if (body !== undefined && !authUrl(url)) throw new LibrusError('UNSAFE_URL');
+			if (body !== undefined && !authUrl(url) && !allowedPostUrls.has(`${url.origin}${url.pathname}`))
+				throw new LibrusError('UNSAFE_URL');
 			const headers: Record<string, string> = {
 				Accept: 'application/json, text/html;q=0.9',
 				'User-Agent': 'n8n-nodes-librus/0.1',
@@ -278,7 +291,20 @@ export class LibrusClient {
 			}
 			if ([301, 302, 303, 307, 308].includes(response.statusCode)) {
 				// Never replay a credential-bearing POST, including on a same-host redirect.
-				if (body !== undefined) throw protocolError('przekierowanie POST');
+				if (body !== undefined) {
+					const location = normalized.location;
+					if (!authUrl(url) && typeof location === 'string') {
+						let target: URL | undefined;
+						try {
+							target = checkedRedirect(location, url.href);
+						} catch {
+							target = undefined;
+						}
+						if (target && (authUrl(target) || /^\/loguj(?:\/|$)/.test(target.pathname)))
+							throw new LibrusError('SESSION_EXPIRED');
+					}
+					throw protocolError('przekierowanie POST');
+				}
 				const location = normalized.location;
 				if (typeof location !== 'string') throw protocolError('adres przekierowania', location);
 				url = checkedRedirect(location, url.href);
@@ -477,5 +503,66 @@ export class LibrusClient {
 			}
 		}
 		throw new LibrusError('SCAN_INCOMPLETE');
+	}
+
+	private async monthPage(year: number, month: number): Promise<CalendarEntry[]> {
+		const body = new URLSearchParams({
+			rok: String(year),
+			miesiac: String(month),
+		}).toString();
+		const response = await this.request('https://synergia.librus.pl/terminarz', body);
+		if (
+			authUrl(response.url) ||
+			/\/loguj(?:\/|$)/.test(response.url.pathname) ||
+			isLoginForm(response.body)
+		)
+			throw new LibrusError('SESSION_EXPIRED');
+		if (
+			response.url.hostname !== 'synergia.librus.pl' ||
+			!/^\/terminarz\/?$/.test(response.url.pathname)
+		)
+			throw protocolError('adres terminarza');
+		try {
+			return parseMonth(response.body, year, month);
+		} catch (error) {
+			if (error instanceof LibrusError && error.code === 'PROTOCOL_ERROR')
+				error.message += ` [Miesiąc terminarza: ${year}-${String(month).padStart(2, '0')}]`;
+			throw error;
+		}
+	}
+
+	async getCalendar(options: CalendarScan, select: CalendarSelect): Promise<CalendarResult> {
+		if (
+			!this.login.username ||
+			!this.login.password ||
+			typeof select !== 'function' ||
+			!Array.isArray(options.months) ||
+			options.months.length < 1 ||
+			options.months.length > 7 ||
+			options.months.some((month) => !/^\d{4}-(?:0[1-9]|1[0-2])$/.test(month))
+		)
+			throw new LibrusError('INVALID_OPTIONS');
+		this.deadline = Date.now() + 120000;
+		this.requests = 0;
+		await this.authenticate();
+		for (let attempt = 0; attempt < 2; attempt++) {
+			try {
+				const entries: CalendarEntry[] = [];
+				for (const month of options.months) {
+					const [year, index] = month.split('-').map(Number);
+					if (year < 2000 || year > 2100) throw new LibrusError('INVALID_OPTIONS');
+					entries.push(...(await this.monthPage(year, index)));
+				}
+				// Hydration lands in Task 5; the selector is already called so that a
+				// recovered session re-runs scan and selection together.
+				select(entries);
+				return { entries, details: new Map<string, CalendarDetail | null>() };
+			} catch (error) {
+				if (!(error instanceof LibrusError) || error.code !== 'SESSION_EXPIRED' || attempt === 1)
+					throw error;
+				await this.authenticate();
+			}
+		}
+		throw new LibrusError('SESSION_EXPIRED');
 	}
 }

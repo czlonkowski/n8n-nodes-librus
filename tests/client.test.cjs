@@ -712,3 +712,91 @@ for (const tag of [
 		);
 	});
 }
+
+const { parseMonth } = require('../dist/nodes/Librus/terminarz');
+
+const grid = (year, index, rows = {}) => {
+	const length = new Date(Date.UTC(year, index, 0)).getUTCDate();
+	return Array.from(
+		{ length },
+		(_, i) =>
+			`<div class="kalendarz-dzien"><div class="kalendarz-numer-dnia">${i + 1}</div><table>${
+				rows[i + 1] ?? ''
+			}</table></div>`,
+	).join('');
+};
+const entryRow = (id, body) =>
+	`<tr><td onclick="location.href='/terminarz/szczegoly/${id}'" title="Nauczyciel: Jan Kowalski<br />Opis: Zakres">${body}</td></tr>`;
+
+test('fetches each month with a credential-free POST and returns parsed entries', async () => {
+	const { client, calls } = setup([
+		...auth(),
+		ok(grid(2026, 9, { 18: entryRow(11, 'Matematyka') })),
+		ok(grid(2026, 10, {})),
+	]);
+	const result = await client.getCalendar({ months: ['2026-09', '2026-10'] }, () => []);
+	assert.deepEqual(
+		result.entries.map((entry) => [entry.key, entry.date]),
+		[['szczegoly/11', '2026-09-18']],
+	);
+	const posts = calls.filter((call) => call.method === 'POST');
+	assert.equal(posts.length, 3); // one OAuth login plus two month forms
+	assert.equal(posts[1].url, 'https://synergia.librus.pl/terminarz');
+	assert.deepEqual(
+		[...new URLSearchParams(posts[1].body).entries()],
+		[
+			['rok', '2026'],
+			['miesiac', '9'],
+		],
+	);
+	assert.doesNotMatch(posts[1].body, /synthetic-password/);
+});
+
+test('a month form redirected anywhere else is never followed or replayed', async () => {
+	const { client, calls } = setup([
+		...auth(),
+		redirect('https://synergia.librus.pl/terminarz/inny'),
+	]);
+	await assert.rejects(client.getCalendar({ months: ['2026-09'] }, () => []), {
+		message: /Walidacja: przekierowanie POST/,
+	});
+	assert.equal(calls.filter((call) => call.url.endsWith('/terminarz/inny')).length, 0);
+});
+
+test('a month form redirected to the login page reports an expired session', async () => {
+	// getCalendar retries exactly once on SESSION_EXPIRED (matching getMessages), so the
+	// second attempt needs its own full authentication cycle before it can fail again.
+	const { client } = setup([
+		...auth(),
+		redirect('https://synergia.librus.pl/loguj'),
+		...auth(),
+		redirect('https://synergia.librus.pl/loguj'),
+	]);
+	await assert.rejects(client.getCalendar({ months: ['2026-09'] }, () => []), {
+		message: /Sesja Librusa wygasła/,
+	});
+});
+
+test('a login form returned instead of the grid reports an expired session', async () => {
+	const form =
+		'<form><input name="login" /><input name="pass" type="password" /></form>';
+	const { client } = setup([...auth(), ok(form), ...auth(), ok(form)]);
+	await assert.rejects(client.getCalendar({ months: ['2026-09'] }, () => []), {
+		message: /Sesja Librusa wygasła/,
+	});
+});
+
+test('a broken grid fails with the month in the diagnostics and never returns an empty calendar', async () => {
+	const { client } = setup([...auth(), ok('<html><body>Awaria</body></html>')]);
+	await assert.rejects(client.getCalendar({ months: ['2026-09'] }, () => []), {
+		message: /Walidacja: siatka terminarza.*Miesiąc terminarza: 2026-09/s,
+	});
+});
+
+test('rejects malformed month windows before touching the network', async () => {
+	const { client } = setup([]);
+	for (const months of [[], ['2026-9'], ['2026-13'], Array(8).fill('2026-09'), 'no'])
+		await assert.rejects(client.getCalendar({ months }, () => []), {
+			message: /Nieprawidłowe dane logowania do Librusa/,
+		});
+});
