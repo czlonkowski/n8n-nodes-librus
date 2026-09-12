@@ -7,7 +7,7 @@ import {
 	protocolError as baseProtocolError,
 	safeError,
 } from './errors';
-import { parseMonth, type CalendarDetail, type CalendarEntry } from './terminarz';
+import { parseEventDetail, parseMonth, type CalendarDetail, type CalendarEntry } from './terminarz';
 export { LibrusError, safeError };
 
 export interface Request {
@@ -90,6 +90,8 @@ const allowedHosts = new Set([
 ]);
 // Credential-free POST targets. The password may still only leave through the OAuth route.
 const allowedPostUrls = new Set(['https://synergia.librus.pl/terminarz']);
+/** Detail fetches per calendar poll. calendarState.MAX_HYDRATION must not exceed this. */
+const MAX_DETAILS = 50;
 function checkedUrl(value: string, base?: string): URL {
 	let url: URL;
 	try {
@@ -531,6 +533,27 @@ export class LibrusClient {
 		}
 	}
 
+	private async eventDetail(route: string, id: string): Promise<CalendarDetail | null> {
+		if ((route !== 'szczegoly' && route !== 'szczegoly_wolne') || !/^\d+$/.test(id))
+			throw new LibrusError('PROTOCOL_ERROR');
+		let response;
+		try {
+			response = await this.request(`https://synergia.librus.pl/terminarz/${route}/${id}`);
+		} catch (error) {
+			// The entry disappeared between the scan and hydration. Leave it unresolved.
+			if (error instanceof LibrusError && error.code === 'SERVICE_ERROR' && error.status === 404)
+				return null;
+			throw error;
+		}
+		if (
+			authUrl(response.url) ||
+			/\/loguj(?:\/|$)/.test(response.url.pathname) ||
+			isLoginForm(response.body)
+		)
+			throw new LibrusError('SESSION_EXPIRED');
+		return parseEventDetail(response.body);
+	}
+
 	async getCalendar(options: CalendarScan, select: CalendarSelect): Promise<CalendarResult> {
 		if (
 			!this.login.username ||
@@ -553,10 +576,23 @@ export class LibrusClient {
 					if (year < 2000 || year > 2100) throw new LibrusError('INVALID_OPTIONS');
 					entries.push(...(await this.monthPage(year, index)));
 				}
-				// Hydration lands in Task 5; the selector is already called so that a
-				// recovered session re-runs scan and selection together.
-				select(entries);
-				return { entries, details: new Map<string, CalendarDetail | null>() };
+				const known = new Map(entries.map((entry) => [entry.key, entry]));
+				const selected = select(entries);
+				if (!Array.isArray(selected)) throw new LibrusError('INVALID_OPTIONS');
+				const details = new Map<string, CalendarDetail | null>();
+				// Bounded independently of the caller. Keys left out stay unresolved,
+				// which the state module treats as "retry on the next poll".
+				for (const key of selected.slice(0, MAX_DETAILS)) {
+					const entry = known.get(key);
+					if (!entry) continue;
+					if (!entry.route || !entry.eventId) {
+						details.set(key, null);
+						continue;
+					}
+					const detail = await this.eventDetail(entry.route, entry.eventId);
+					if (detail !== null) details.set(key, detail);
+				}
+				return { entries, details };
 			} catch (error) {
 				if (!(error instanceof LibrusError) || error.code !== 'SESSION_EXPIRED' || attempt === 1)
 					throw error;

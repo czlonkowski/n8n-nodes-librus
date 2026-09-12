@@ -800,3 +800,83 @@ test('rejects malformed month windows before touching the network', async () => 
 			message: /Nieprawidłowe dane logowania do Librusa/,
 		});
 });
+
+const detailPage = (rows) =>
+	`<div class="container-background"><table><tbody>${rows
+		.map(([label, value]) => `<tr><th>${label}</th><td>${value}</td></tr>`)
+		.join('')}</tbody></table></div>`;
+const sampleDetail = detailPage([
+	['Data', '2026-09-18'],
+	['Rodzaj', 'Sprawdzian'],
+	['Sala', '12'],
+]);
+
+test('hydrates only the selected keys and reports the raw Rodzaj', async () => {
+	const { client, calls } = setup([
+		...auth(),
+		ok(grid(2026, 9, { 18: entryRow(11, 'Matematyka') + entryRow(12, 'Fizyka') })),
+		ok(sampleDetail),
+	]);
+	const result = await client.getCalendar({ months: ['2026-09'] }, () => ['szczegoly/11']);
+	assert.equal(result.details.get('szczegoly/11').rodzaj, 'Sprawdzian');
+	assert.equal(result.details.has('szczegoly/12'), false);
+	assert.equal(
+		calls.at(-1).url,
+		'https://synergia.librus.pl/terminarz/szczegoly/11',
+	);
+});
+
+test('a detail page that is gone is left unresolved so the next poll retries it', async () => {
+	const { client } = setup([
+		...auth(),
+		ok(grid(2026, 9, { 18: entryRow(11, 'Matematyka') })),
+		{ statusCode: 404, headers: {}, body: 'Nie znaleziono' },
+	]);
+	const result = await client.getCalendar({ months: ['2026-09'] }, () => ['szczegoly/11']);
+	assert.equal(result.details.has('szczegoly/11'), false);
+});
+
+test('an entry with no detail link resolves to null so it can still be committed', async () => {
+	const row = '<tr><td>Dzień wolny</td></tr>';
+	const { client, calls } = setup([...auth(), ok(grid(2026, 9, { 2: row }))]);
+	const scanned = await client.getCalendar({ months: ['2026-09'] }, (entries) =>
+		entries.map((entry) => entry.key),
+	);
+	const [key] = [...scanned.details.keys()];
+	assert.match(key, /^hash\//);
+	assert.equal(scanned.details.get(key), null);
+	assert.equal(calls.filter((call) => call.url.includes('/terminarz/szczegoly')).length, 0);
+});
+
+test('hydration is bounded, and unhydrated keys stay unresolved', async () => {
+	const rows = Object.fromEntries(
+		Array.from({ length: 30 }, (_, day) => [day + 1, entryRow(day + 1, 'Test') + entryRow(day + 101, 'Test')]),
+	);
+	const { client } = setup([...auth(), ok(grid(2026, 9, rows)), ...Array(50).fill(ok(sampleDetail))]);
+	const result = await client.getCalendar({ months: ['2026-09'] }, (entries) =>
+		entries.map((entry) => entry.key),
+	);
+	assert.equal(result.details.size, 50);
+});
+
+test('an expired session during hydration restarts scan and selection once', async () => {
+	let selections = 0;
+	const { client } = setup([
+		...auth(),
+		ok(grid(2026, 9, { 18: entryRow(11, 'Matematyka') })),
+		redirect('https://synergia.librus.pl/loguj'),
+		// The detail request is a GET, so `request()` follows this redirect itself
+		// (only a POST redirect to /loguj short-circuits without following). The next
+		// reply is what the follow lands on: a terminal login-page response at /loguj.
+		ok('<form><input name="login" /><input name="pass" type="password" /></form>'),
+		...auth(),
+		ok(grid(2026, 9, { 18: entryRow(11, 'Matematyka') })),
+		ok(sampleDetail),
+	]);
+	const result = await client.getCalendar({ months: ['2026-09'] }, () => {
+		selections += 1;
+		return ['szczegoly/11'];
+	});
+	assert.equal(selections, 2);
+	assert.equal(result.details.get('szczegoly/11').rodzaj, 'Sprawdzian');
+});
