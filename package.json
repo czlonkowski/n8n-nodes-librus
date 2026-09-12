@@ -31,7 +31,7 @@
     "NOTICE.md",
     "SECURITY.md",
     "CHANGELOG.md",
-    "docs"
+    "docs/*.md"
   ],
   "n8n": {
     "n8nNodesApiVersion": 1,

@@ -96,8 +96,10 @@ export class LibrusTrigger implements INodeType {
 		// n8n uses the Trigger suffix to discover events on the shared Librus card.
 		displayName: 'Librus Trigger',
 		name: 'librusTrigger',
+		// The fallback matches the `event` parameter's default, so an unexpected value
+		// never labels the node with a calendar event it is not running.
 		subtitle:
-			'={{$parameter["event"] === "newMessage" ? "Nowa wiadomość" : $parameter["event"] === "newCalendarEvent" ? "Nowe wydarzenie w terminarzu" : "Zmiana wydarzenia w terminarzu"}}',
+			'={{$parameter["event"] === "newCalendarEvent" ? "Nowe wydarzenie w terminarzu" : $parameter["event"] === "changedCalendarEvent" ? "Zmiana wydarzenia w terminarzu" : "Nowa wiadomość"}}',
 		icon: 'file:librus.png',
 		group: ['trigger'],
 		version: 1,
@@ -173,7 +175,7 @@ export class LibrusTrigger implements INodeType {
 				displayOptions: { show: { event: ['newCalendarEvent', 'changedCalendarEvent'] } },
 			},
 			{
-				displayName: 'Liczba miesięcy wprzód',
+				displayName: 'Liczba miesięcy do przodu',
 				name: 'monthsAhead',
 				type: 'number',
 				default: 1,
