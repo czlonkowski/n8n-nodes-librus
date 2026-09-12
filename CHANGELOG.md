@@ -19,6 +19,7 @@
 - Report invalid calendar settings with their own message naming Liczba miesięcy do przodu instead of the message-fetching settings, which the calendar events do not have.
 - Rename the parameter label to Liczba miesięcy do przodu, fall back to Nowa wiadomość in the node subtitle for an unexpected event value, and keep internal planning documents out of the published npm package.
 - Describe both message and calendar automation in the package description.
+- Fix calendar state pruning keeping records for months beyond a shrunk window indefinitely: prune against the exact set of scanned months instead of only the window's start.
 
 ## 0.1.5 — 2026-09-08
 

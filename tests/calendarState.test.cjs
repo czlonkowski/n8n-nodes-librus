@@ -507,6 +507,37 @@ test('entries whose month leaves the window are pruned', () => {
 	assert.equal(state.librusCalendar.window.from, '2026-10');
 });
 
+test('shrinking the window drops the now out-of-window future month from stored state', () => {
+	const state = {};
+	const wide = window('2026-09', 3, ['2026-09', '2026-10', '2026-11', '2026-12']);
+	run(state, account, wide, [
+		entry('szczegoly/1', '2026-09-18'),
+		entry('szczegoly/9', '2026-12-05'),
+	]);
+	const narrow = window('2026-09', 1, ['2026-09', '2026-10']);
+	run(state, account, narrow, [entry('szczegoly/1', '2026-09-18')]);
+	assert.deepEqual(Object.keys(state.librusCalendar.events), ['szczegoly/1']);
+});
+
+test('growing the window back afterwards re-records the dropped month silently, with no emission', () => {
+	const state = {};
+	const wide = window('2026-09', 3, ['2026-09', '2026-10', '2026-11', '2026-12']);
+	run(state, account, wide, [
+		entry('szczegoly/1', '2026-09-18'),
+		entry('szczegoly/9', '2026-12-05'),
+	]);
+	run(state, account, window('2026-09', 1, ['2026-09', '2026-10']), [
+		entry('szczegoly/1', '2026-09-18'),
+	]);
+	const grown = run(state, account, wide, [
+		entry('szczegoly/1', '2026-09-18'),
+		entry('szczegoly/9', '2026-12-05'),
+	]);
+	assert.deepEqual(grown.changes, []);
+	assert.ok('szczegoly/9' in state.librusCalendar.events);
+	assert.equal(state.librusCalendar.events['szczegoly/9'].s.date, '2026-12-05');
+});
+
 test('one synthetic disappearance plus one synthetic addition on a date read as a change', () => {
 	const state = {};
 	const span = window('2026-09', 0, ['2026-09']);

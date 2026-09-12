@@ -307,9 +307,10 @@ export function commitCalendarPoll(
 
 	const candidates = new Set([...plan.added, ...plan.changed]);
 	const removedKeys = new Set(plan.removed);
+	const scannedMonths = new Set(plan.window.months);
 	const events: Record<string, StoredEvent> = {};
 	for (const [key, record] of Object.entries(plan.stored)) {
-		if (record.m < plan.window.from) continue; // out of the window, unobservable from now on
+		if (!scannedMonths.has(record.m)) continue; // not one of the scanned months, unobservable from now on
 		if (removedKeys.has(key)) continue;
 		events[key] = record; // untouched: unchanged entries and deferred changes keep their old record
 	}
