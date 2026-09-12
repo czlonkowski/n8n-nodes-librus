@@ -111,6 +111,28 @@ test('a full final page and a repeated page fail instead of silently truncating'
 		{ code: 'SCAN_INCOMPLETE' },
 	);
 });
+test('the message-path request-count budget stops a scan drawn out by redirects', async () => {
+	// Authentication spends 8 of the 100-request budget. Each inbox page below burns 11 more
+	// (ten redirect hops plus the landing response), so eight full pages leave the counter at
+	// 96. The ninth page's request() call increments past 100 on its fifth hop (97, 98, 99,
+	// 100, 101) — that hop throws before consuming a reply, so only four redirect stubs are
+	// needed to reach it. This exercises `++this.requests > MAX_REQUESTS`, not the deadline
+	// limb: nothing here touches the clock, so the 120-second deadline is nowhere close.
+	const redirectToInbox = () => redirect('https://wiadomosci.librus.pl/api/inbox/messages');
+	const fullPage = (page) => [
+		...Array.from({ length: 10 }, redirectToInbox),
+		ok({ data: Array.from({ length: 50 }, (_, i) => message(`${page}-${i}`)) }),
+	];
+	const replies = [...auth()];
+	for (let page = 1; page <= 8; page++) replies.push(...fullPage(page));
+	replies.push(redirectToInbox(), redirectToInbox(), redirectToInbox(), redirectToInbox());
+	const { client, replies: remaining } = setup(replies);
+	await assert.rejects(
+		client.getMessages({ returnAll: true, limit: 1000, maxPages: 50, includeContent: false }),
+		{ code: 'SCAN_INCOMPLETE' },
+	);
+	assert.equal(remaining.length, 0);
+});
 test('bounded limit returns exactly the requested unique count', async () => {
 	const { client } = setup([
 		...auth(),
