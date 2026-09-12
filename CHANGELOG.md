@@ -8,6 +8,13 @@
 - Record calendar discovery history under its own librusCalendar state key, separate from the existing message history, with an independent silent baseline, window pruning and account-change reset.
 - Add a free-text, case-insensitive event-kind filter that always passes an unknown kind, so an unrecognized or not-yet-hydrated event type is never silently dropped.
 - Leave message behaviour, the newMessage event and its defaults unchanged for existing workflows.
+- Bound each day block of the month grid to its own element, so a page legend or footer after the grid is no longer read as events dated to the last day of the month, and a footer that changes between polls no longer emits a phantom change every poll; an unbalanced grid fails the poll instead.
+- Fix calendar polling aborting silently and permanently after a credential or username change: the concurrency guard now compares the stored owner against the owner seen when the poll was planned, so an account change commits its silent baseline and the next poll emits again.
+- Give each calendar attempt its own request budget so a session expiry late in detail hydration can still complete its single retry, and report an exhausted calendar scan with its own message pointing at Liczba miesięcy do przodu instead of the inbox page limit.
+- Silence only the months a larger window actually added, so months that the passage of time had already brought into range still emit instead of being baselined away.
+- Skip entries with no detail link before applying the 50-page hydration budget, so a real backlog of linked events drains faster.
+- Reject stored calendar records whose month is malformed, which would otherwise be neither prunable nor removable.
+- Rename the parameter label to Liczba miesięcy do przodu, fall back to Nowa wiadomość in the node subtitle for an unexpected event value, and keep internal planning documents out of the published npm package.
 
 ## 0.1.5 — 2026-09-08
 
