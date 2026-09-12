@@ -932,29 +932,73 @@ test('a session expiry late in hydration leaves the retry a full request budget'
 	assert.equal(calls.length, 130); // both attempts ran to completion: 65 requests each
 });
 
-test('an exhausted calendar budget names the month window, not the inbox page limit', async () => {
-	const months = Array.from({ length: 7 }, (_, i) => `2026-0${i + 1}`);
+test('a detail page redirected to another Synergia page is never parsed as a detail', async () => {
+	// A GET follows redirects, so without a final-URL check this table would be hydrated
+	// onto the event: two th/td rows are all `parseEventDetail` requires.
+	const otherPage =
+		'<div><table><tr><th>Przedmiot</th><td>Matematyka</td></tr>' +
+		'<tr><th>Ocena</th><td>5</td></tr></table></div>';
+	const { client } = setup([
+		...auth(),
+		ok(grid(2026, 9, { 18: entryRow(11, 'Matematyka') })),
+		redirect('https://synergia.librus.pl/przegladaj_oceny/uczen'),
+		ok(otherPage),
+	]);
+	await assert.rejects(
+		client.getCalendar({ months: ['2026-09'] }, () => ['szczegoly/11']),
+		(error) => {
+			assert.equal(error.code, 'PROTOCOL_ERROR');
+			assert.match(error.message, /Walidacja: adres wydarzenia terminarza/);
+			return true;
+		},
+	);
+});
+
+test('hydration stops on the remaining request budget instead of failing the whole poll', async () => {
+	// Every detail page takes one redirect hop, so a fetch costs two requests. Authentication
+	// (8) and one month (1) leave 91 of the 100-request budget; hydration keeps fetching
+	// while at least 11 remain (one fetch plus the ten redirect hops it may follow), so it
+	// stops after 41 entries with 9 unspent. The rest stay unresolved for the next poll —
+	// exhausting the budget here would throw away the entire scan instead.
+	const ids = [];
+	for (let day = 1; day <= 25; day++) ids.push(day, day + 100);
 	const rows = Object.fromEntries(
 		Array.from({ length: 25 }, (_, i) => [
 			i + 1,
 			entryRow(i + 1, 'Matematyka') + entryRow(i + 101, 'Fizyka'),
 		]),
 	);
-	// Every detail page takes a redirect hop, so hydration costs two requests per entry
-	// and the 100-request cap is reached partway through.
-	const { client } = setup([
+	const { client, calls, replies } = setup([
 		...auth(),
-		ok(grid(2026, 1, rows)),
-		...months.slice(1).map((month, i) => ok(grid(2026, i + 2, {}))),
-		...Array(50)
-			.fill(null)
-			.flatMap(() => [
-				redirect('https://synergia.librus.pl/terminarz/szczegoly/1'),
-				ok(sampleDetail),
-			]),
+		ok(grid(2026, 9, rows)),
+		...ids.flatMap((id) => [
+			redirect(`https://synergia.librus.pl/terminarz/szczegoly/${id}`),
+			ok(sampleDetail),
+		]),
 	]);
+	const result = await client.getCalendar({ months: ['2026-09'] }, (entries) =>
+		entries.map((entry) => entry.key),
+	);
+	assert.equal(result.details.size, 41);
+	assert.equal(result.details.get(`szczegoly/${ids[40]}`).rodzaj, 'Sprawdzian');
+	assert.equal(result.details.has(`szczegoly/${ids[41]}`), false);
+	assert.equal(calls.length, 91);
+	assert.equal(replies.length, (50 - 41) * 2); // nine entries were never fetched
+});
+
+test('an exhausted calendar budget names the month window, not the inbox page limit', async (t) => {
+	// The request cap can no longer be reached during hydration, but the 120-second
+	// deadline still bounds the operation. Mock the clock so it elapses deterministically.
+	t.mock.timers.enable({ apis: ['Date'] });
+	t.mock.timers.setTime(Date.parse('2026-09-12T08:00:00Z'));
+	const replies = [...auth(), ok(grid(2026, 9, { 18: entryRow(11, 'Matematyka') }))];
+	const client = new LibrusClient(async () => {
+		t.mock.timers.tick(30000); // four requests spend the whole 120-second deadline
+		assert.ok(replies.length, 'Unexpected additional request');
+		return replies.shift();
+	}, login);
 	await assert.rejects(
-		client.getCalendar({ months }, (entries) => entries.map((entry) => entry.key)),
+		client.getCalendar({ months: ['2026-09'] }, (entries) => entries.map((entry) => entry.key)),
 		(error) => {
 			assert.equal(error.code, 'CALENDAR_SCAN_INCOMPLETE');
 			assert.match(error.message, /Zmniejsz Liczbę miesięcy do przodu/);

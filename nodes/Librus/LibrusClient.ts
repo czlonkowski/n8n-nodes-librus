@@ -76,6 +76,7 @@ type ProtocolCheck =
 	| 'limit przekierowań'
 	| 'adres skrzynki'
 	| 'adres terminarza'
+	| 'adres wydarzenia terminarza'
 	| 'obiekt odpowiedzi skrzynki'
 	| 'tablica wiadomości'
 	| 'liczba wiadomości na stronie';
@@ -92,6 +93,19 @@ const allowedHosts = new Set([
 const allowedPostUrls = new Set(['https://synergia.librus.pl/terminarz']);
 /** Detail fetches per calendar poll. calendarState.MAX_HYDRATION must not exceed this. */
 const MAX_DETAILS = 50;
+/** HTTP requests one operation attempt may make, redirect hops included. */
+const MAX_REQUESTS = 100;
+/** Redirect hops one `request()` call follows before it gives up. */
+const MAX_REDIRECTS = 10;
+/**
+ * Requests to leave unspent before starting another detail fetch: the fetch itself plus
+ * every redirect hop it may follow (1 + MAX_REDIRECTS). Below that, hydration stops
+ * instead of risking the budget error mid-fetch. Keys left unfetched are simply absent
+ * from the details map, which the state module retries on the next poll, so the poll
+ * still commits; throwing here would discard the whole scan and make a persistent
+ * redirect pattern retry the same backlog forever.
+ */
+const DETAIL_HEADROOM = MAX_REDIRECTS + 1;
 function checkedUrl(value: string, base?: string): URL {
 	let url: URL;
 	try {
@@ -253,8 +267,8 @@ export class LibrusClient {
 
 	private async request(value: string, body?: string): Promise<Response & { url: URL }> {
 		let url = checkedUrl(value);
-		for (let hop = 0; hop <= 10; hop++) {
-			if (++this.requests > 100 || Date.now() >= this.deadline)
+		for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+			if (++this.requests > MAX_REQUESTS || Date.now() >= this.deadline)
 				throw new LibrusError(this.budgetCode);
 			if (
 				body !== undefined &&
@@ -548,9 +562,10 @@ export class LibrusClient {
 	private async eventDetail(route: string, id: string): Promise<CalendarDetail | null> {
 		if ((route !== 'szczegoly' && route !== 'szczegoly_wolne') || !/^\d+$/.test(id))
 			throw new LibrusError('PROTOCOL_ERROR');
+		const path = `/terminarz/${route}/${id}`;
 		let response;
 		try {
-			response = await this.request(`https://synergia.librus.pl/terminarz/${route}/${id}`);
+			response = await this.request(`https://synergia.librus.pl${path}`);
 		} catch (error) {
 			// The entry disappeared between the scan and hydration. Leave it unresolved.
 			if (error instanceof LibrusError && error.code === 'SERVICE_ERROR' && error.status === 404)
@@ -563,6 +578,12 @@ export class LibrusClient {
 			isLoginForm(response.body)
 		)
 			throw new LibrusError('SESSION_EXPIRED');
+		// A GET follows redirects, so the body may come from another allowed page entirely.
+		// Two th/td rows are enough for `parseEventDetail` to accept it, so the entry would
+		// be hydrated from whatever that page happens to contain. The month form is checked
+		// the same way.
+		if (response.url.hostname !== 'synergia.librus.pl' || response.url.pathname !== path)
+			throw protocolError('adres wydarzenia terminarza');
 		return parseEventDetail(response.body);
 	}
 
@@ -606,9 +627,11 @@ export class LibrusClient {
 					}
 					fetchable.push({ key, route: entry.route, id: entry.eventId });
 				}
-				// Bounded independently of the caller. Keys left out stay unresolved,
-				// which the state module treats as "retry on the next poll".
+				// Bounded independently of the caller, by the detail cap and by what is left
+				// of the request budget. Keys left out stay unresolved, which the state
+				// module treats as "retry on the next poll".
 				for (const { key, route, id } of fetchable.slice(0, MAX_DETAILS)) {
+					if (MAX_REQUESTS - this.requests < DETAIL_HEADROOM) break;
 					const detail = await this.eventDetail(route, id);
 					if (detail !== null) details.set(key, detail);
 				}
