@@ -47,7 +47,8 @@ test('builds an inclusive month window and rejects impossible spans', () => {
 	assert.deepEqual(monthWindow(new Date(2026, 8, 1), 0).months, ['2026-09']);
 	for (const invalid of [-1, 7, 1.5, '2'])
 		assert.throws(() => monthWindow(new Date(2026, 8, 1), invalid), {
-			message: /Nieprawidłowe dane logowania do Librusa/,
+			code: 'CALENDAR_INVALID_OPTIONS',
+			message: /ustawienia sprawdzania terminarza.*Liczbę miesięcy do przodu/s,
 		});
 });
 

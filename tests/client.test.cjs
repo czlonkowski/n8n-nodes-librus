@@ -806,13 +806,20 @@ test('a broken grid fails with the month in the diagnostics and never returns an
 
 test('rejects malformed month windows before touching the network', async () => {
 	const { client } = setup([]);
+	// The calendar path names the calendar settings, not the message-fetching ones.
 	for (const months of [[], ['2026-9'], ['2026-13'], Array(8).fill('2026-09'), 'no'])
 		await assert.rejects(
 			client.getCalendar({ months }, () => []),
 			{
-				message: /Nieprawidłowe dane logowania do Librusa/,
+				code: 'CALENDAR_INVALID_OPTIONS',
+				message: /ustawienia sprawdzania terminarza.*Liczbę miesięcy do przodu/s,
 			},
 		);
+	// The out-of-range year is only reachable after authentication, and reports the same code.
+	await assert.rejects(
+		setup([...auth()]).client.getCalendar({ months: ['1999-09'] }, () => []),
+		{ code: 'CALENDAR_INVALID_OPTIONS' },
+	);
 });
 
 const detailPage = (rows) =>

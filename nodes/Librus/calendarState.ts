@@ -46,7 +46,7 @@ export interface CalendarPlan {
 
 export function monthWindow(now: Date, monthsAhead: number): CalendarWindow {
 	if (!Number.isInteger(monthsAhead) || monthsAhead < 0 || monthsAhead > 6)
-		throw new LibrusError('INVALID_OPTIONS');
+		throw new LibrusError('CALENDAR_INVALID_OPTIONS');
 	const months: string[] = [];
 	for (let offset = 0; offset <= monthsAhead; offset++) {
 		const date = new Date(now.getFullYear(), now.getMonth() + offset, 1);

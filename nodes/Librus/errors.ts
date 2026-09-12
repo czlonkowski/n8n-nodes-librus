@@ -18,6 +18,9 @@ const messages: Record<string, string> = {
 	FULL_CONTENT_LIMIT:
 		'W jednym wykonaniu można pobrać pełną treść maksymalnie 50 wiadomości. Wyłącz Pobierz wszystkie i ustaw Limit na 50 lub mniej.',
 	INVALID_OPTIONS: 'Nieprawidłowe dane logowania do Librusa lub ustawienia pobierania wiadomości.',
+	// The calendar events have no message settings; their only numeric setting is the window.
+	CALENDAR_INVALID_OPTIONS:
+		'Nieprawidłowe dane logowania do Librusa lub ustawienia sprawdzania terminarza. Sprawdź Liczbę miesięcy do przodu.',
 	TRIGGER_STATE_INVALID:
 		'Zapisana historia wykrytych wiadomości jest nieprawidłowa. Utwórz ponownie węzeł Nowa wiadomość, aby zapamiętać aktualną skrzynkę.',
 	TRIGGER_STATE_LIMIT:

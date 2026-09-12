@@ -597,7 +597,7 @@ export class LibrusClient {
 			options.months.length > 7 ||
 			options.months.some((month) => !/^\d{4}-(?:0[1-9]|1[0-2])$/.test(month))
 		)
-			throw new LibrusError('INVALID_OPTIONS');
+			throw new LibrusError('CALENDAR_INVALID_OPTIONS');
 		this.budgetCode = 'CALENDAR_SCAN_INCOMPLETE';
 		this.deadline = Date.now() + 120000;
 		this.requests = 0;
@@ -607,12 +607,12 @@ export class LibrusClient {
 				const entries: CalendarEntry[] = [];
 				for (const month of options.months) {
 					const [year, index] = month.split('-').map(Number);
-					if (year < 2000 || year > 2100) throw new LibrusError('INVALID_OPTIONS');
+					if (year < 2000 || year > 2100) throw new LibrusError('CALENDAR_INVALID_OPTIONS');
 					entries.push(...(await this.monthPage(year, index)));
 				}
 				const known = new Map(entries.map((entry) => [entry.key, entry]));
 				const selected = select(entries);
-				if (!Array.isArray(selected)) throw new LibrusError('INVALID_OPTIONS');
+				if (!Array.isArray(selected)) throw new LibrusError('CALENDAR_INVALID_OPTIONS');
 				const details = new Map<string, CalendarDetail | null>();
 				// A link-less (synthetic-key) entry has nothing to fetch, so it is resolved
 				// as null here and never consumes one of the MAX_DETAILS slots — a real
