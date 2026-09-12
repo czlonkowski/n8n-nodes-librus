@@ -81,7 +81,7 @@ Przykładowy workflow: **Librus — Nowa wiadomość → Librus (Pobierz treść
 - **Nowe wydarzenie w terminarzu** uruchamia się, gdy w terminarzu pojawi się wydarzenie, którego wcześniej nie było.
 - **Zmiana wydarzenia w terminarzu** uruchamia się dla edycji istniejącego wydarzenia (np. zmiana opisu albo przeniesienie na inny dzień) **oraz dla wydarzeń, które zniknęły z terminarza** — usunięcie lub odwołanie wydarzenia trafia na to samo zdarzenie co zmiana (`changeType: "removed"`), a nie na osobne zdarzenie.
 
-Każdy element zawiera m.in. `changeType`, `eventKey`, `eventId`, `route`, `date`, `subject`, `teacher`, `description`, `rodzaj`, `room`, `addedAt` i `details`; dla zmian i usunięć dodatkowo `changedFields` oraz `previous` z poprzednią wersją wydarzenia.
+Każdy element zawiera m.in. `changeType`, `eventKey`, `eventId`, `route`, `date`, `subject`, `teacher`, `description`, `rodzaj`, `room`, `addedAt`, `details`, `changedFields` oraz `previous`; dla nowych wydarzeń te dwa ostatnie pola są puste (`changedFields: []`, `previous: null`), a przy zmianach i usunięciach niosą listę zmienionych pól i poprzednią wersję wydarzenia.
 
 ## Ograniczenia i rozwiązywanie problemów
 
