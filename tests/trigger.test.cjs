@@ -360,14 +360,21 @@ test('the first calendar poll is a silent baseline and the next one emits additi
 	const state = {};
 	const trigger = new LibrusTrigger();
 	let restore = stubCalendar([calendarEntry('szczegoly/1', '2026-09-18')], new Map());
-	assert.equal(await trigger.poll.call(calendarContext(state, 'newCalendarEvent')), null);
-	restore();
+	try {
+		assert.equal(await trigger.poll.call(calendarContext(state, 'newCalendarEvent')), null);
+	} finally {
+		restore();
+	}
 	restore = stubCalendar(
 		[calendarEntry('szczegoly/1', '2026-09-18'), calendarEntry('szczegoly/2', '2026-09-20')],
 		new Map([['szczegoly/2', calendarDetail('Kartkówka')]]),
 	);
-	const result = await trigger.poll.call(calendarContext(state, 'newCalendarEvent'));
-	restore();
+	let result;
+	try {
+		result = await trigger.poll.call(calendarContext(state, 'newCalendarEvent'));
+	} finally {
+		restore();
+	}
 	assert.equal(result[0].length, 1);
 	assert.deepEqual(
 		{
@@ -394,8 +401,11 @@ test('the change event emits edits and disappearances, and never additions', asy
 		[calendarEntry('szczegoly/1', '2026-09-18'), calendarEntry('szczegoly/2', '2026-09-20')],
 		new Map(),
 	);
-	await trigger.poll.call(calendarContext(state, 'changedCalendarEvent'));
-	restore();
+	try {
+		await trigger.poll.call(calendarContext(state, 'changedCalendarEvent'));
+	} finally {
+		restore();
+	}
 	restore = stubCalendar(
 		[calendarEntry('szczegoly/1', '2026-09-25'), calendarEntry('szczegoly/3', '2026-09-27')],
 		new Map([
@@ -403,8 +413,12 @@ test('the change event emits edits and disappearances, and never additions', asy
 			['szczegoly/3', calendarDetail('Wycieczka')],
 		]),
 	);
-	const result = await trigger.poll.call(calendarContext(state, 'changedCalendarEvent'));
-	restore();
+	let result;
+	try {
+		result = await trigger.poll.call(calendarContext(state, 'changedCalendarEvent'));
+	} finally {
+		restore();
+	}
 	assert.deepEqual(
 		result[0].map((item) => [item.json.changeType, item.json.eventKey]).sort(),
 		[
@@ -418,8 +432,11 @@ test('the type filter matches case-insensitively and never drops an unknown kind
 	const state = {};
 	const trigger = new LibrusTrigger();
 	let restore = stubCalendar([], new Map());
-	await trigger.poll.call(calendarContext(state, 'newCalendarEvent'));
-	restore();
+	try {
+		await trigger.poll.call(calendarContext(state, 'newCalendarEvent'));
+	} finally {
+		restore();
+	}
 	restore = stubCalendar(
 		[
 			calendarEntry('szczegoly/1', '2026-09-18'),
@@ -432,10 +449,14 @@ test('the type filter matches case-insensitively and never drops an unknown kind
 			['szczegoly/3', null],
 		]),
 	);
-	const result = await trigger.poll.call(
-		calendarContext(state, 'newCalendarEvent', { eventTypes: ' SPRAWDZIAN , kartkówka ' }),
-	);
-	restore();
+	let result;
+	try {
+		result = await trigger.poll.call(
+			calendarContext(state, 'newCalendarEvent', { eventTypes: ' SPRAWDZIAN , kartkówka ' }),
+		);
+	} finally {
+		restore();
+	}
 	assert.deepEqual(result[0].map((item) => item.json.eventKey).sort(), [
 		'szczegoly/1',
 		'szczegoly/3',
@@ -449,8 +470,12 @@ test('a manual test returns a bounded sample and never touches history', async (
 		calendarEntry(`szczegoly/${i}`, '2026-09-18'),
 	);
 	const restore = stubCalendar(entries, new Map());
-	const result = await trigger.poll.call(calendarContext(state, 'newCalendarEvent', {}, true));
-	restore();
+	let result;
+	try {
+		result = await trigger.poll.call(calendarContext(state, 'newCalendarEvent', {}, true));
+	} finally {
+		restore();
+	}
 	assert.equal(result[0].length, 5);
 	assert.equal(result[0][0].json.changeType, 'sample');
 	assert.deepEqual(state, {});

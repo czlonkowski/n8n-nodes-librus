@@ -111,7 +111,7 @@ export class LibrusTrigger implements INodeType {
 		credentials: [{ name: 'librusSessionApi', required: true, testedBy: 'librusConnectionTest' }],
 		properties: [
 			{
-				displayName: 'Event',
+				displayName: 'Zdarzenie',
 				name: 'event',
 				type: 'options',
 				noDataExpression: true,
