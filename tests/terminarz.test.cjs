@@ -68,8 +68,53 @@ test('an incomplete or duplicated day grid fails rather than guessing dates', ()
 	});
 });
 
+// Real Synergia pages are complete documents: the month grid is followed by a legend and
+// a footer, and the footer carries a value that moves between polls.
+const chrome = (stamp) =>
+	'<div class="legenda"><table><tr><td>Sprawdzian</td></tr><tr><td>Kartkówka</td></tr></table></div>' +
+	`<div class="stopka"><table><tr><td>Ostatnie logowanie: ${stamp}</td></tr></table></div>`;
+const withTrailing = (html, trailing) => html.replace('</body>', `${trailing}</body>`);
+
+test('a legend and a footer after the grid are not read as entries on the last day', () => {
+	const rows = cell(`onclick="location.href='/terminarz/szczegoly/123456'"`, 'Matematyka');
+	const entries = parseMonth(
+		withTrailing(month(2026, 9, { 18: day(18, rows) }), chrome('2026-09-30 21:15:00')),
+		2026,
+		9,
+	);
+	assert.deepEqual(
+		entries.map((found) => [found.key, found.date]),
+		[['szczegoly/123456', '2026-09-18']],
+	);
+});
+
+test('a footer that changes between polls leaves every entry key identical', () => {
+	const rows = cell('class="nb"', 'Dzień wolny od zajęć');
+	const grid = month(2026, 9, { 2: day(2, rows) });
+	const first = parseMonth(withTrailing(grid, chrome('2026-09-30 21:15:00')), 2026, 9);
+	const second = parseMonth(withTrailing(grid, chrome('2026-09-30 22:47:11')), 2026, 9);
+	assert.equal(first.length, 1);
+	assert.deepEqual(
+		first.map((found) => found.key),
+		second.map((found) => found.key),
+	);
+});
+
+test('a cell sitting between two day blocks is attributed to neither day', () => {
+	const stray = `${day(1)}<table><tr><td>Legenda: sprawdzian</td></tr></table>`;
+	assert.deepEqual(parseMonth(month(2026, 9, { 1: stray }), 2026, 9), []);
+});
+
+test('a day block that is never closed fails instead of absorbing the rest of the page', () => {
+	const unclosed = day(30).slice(0, -'</div>'.length);
+	assert.throws(() => parseMonth(month(2026, 9, { 30: unclosed }), 2026, 9), {
+		message: /Walidacja: siatka terminarza/,
+	});
+});
+
 test('named, decimal, hexadecimal entities and non-breaking spaces decode', () => {
-	assert.equal(decodeEntities('a&amp;b&nbsp;c&#322;&#x142;&quot;'), 'a&b cłł"');
+	// \u00a0 rather than the character itself: a literal U+00A0 is invisible in review.
+	assert.equal(decodeEntities('a&amp;b&nbsp;c&#322;&#x142;&quot;'), 'a&b\u00a0cłł"');
 });
 
 const detail = (rows) =>

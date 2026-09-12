@@ -41,7 +41,8 @@ const named: Record<string, string> = {
 	gt: '>',
 	quot: '"',
 	apos: "'",
-	nbsp: String.fromCharCode(0xa0),
+	// Written as an escape: a literal U+00A0 is invisible in a diff and in review.
+	nbsp: '\u00a0',
 };
 export function decodeEntities(value: string): string {
 	return value.replace(/&(#[xX][0-9a-fA-F]+|#\d+|[a-zA-Z]+);/g, (match, name: string) => {
@@ -56,7 +57,7 @@ export function decodeEntities(value: string): string {
 /** Tag stripped, entity decoded, whitespace collapsed. A <br> becomes a line break. */
 function text(html: string): string {
 	return decodeEntities(html.replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]*>/g, ''))
-		.replace(new RegExp(String.fromCharCode(0xa0), 'g'), ' ')
+		.replace(/\u00a0/g, ' ')
 		.split('\n')
 		.map((line) => line.replace(/\s+/g, ' ').trim())
 		.filter((line) => line)
@@ -102,16 +103,38 @@ function entry(date: string, attrs: Record<string, string>, body: string): Calen
 	};
 }
 
+/**
+ * Offset of the `</div>` that closes the day block whose content starts at `start`.
+ *
+ * A day block owns exactly its own element. Ending it at the next block's start instead
+ * would give the last day of the month everything that follows the grid — the page
+ * legend, the footer, any trailing table — and every `<td>` in there would be read as an
+ * entry on that date. A footer that varies between polls (a clock, a last-login stamp)
+ * would then produce a synthetic removal plus a synthetic addition every single poll.
+ *
+ * An unbalanced document is a protocol violation, not something to recover from: a
+ * truncated page must fail the poll rather than silently absorb the rest of the file.
+ */
+function blockEnd(html: string, start: number): number {
+	const tags = /<div\b|<\/div\b/gi;
+	tags.lastIndex = start;
+	let depth = 1;
+	for (let match = tags.exec(html); match; match = tags.exec(html)) {
+		depth += match[0][1] === '/' ? -1 : 1;
+		if (depth === 0) return match.index;
+	}
+	throw protocolError('siatka terminarza', depth);
+}
+
 export function parseMonth(html: string, year: number, month: number): CalendarEntry[] {
 	if (typeof html !== 'string') throw protocolError('dokument HTML', html);
 	const blocks = [...html.matchAll(/<div\b[^>]*class="[^"]*\bkalendarz-dzien\b[^"]*"[^>]*>/gi)];
 	if (!blocks.length) throw protocolError('siatka terminarza', blocks.length);
 	const days = new Set<number>();
 	const entries: CalendarEntry[] = [];
-	for (const [index, block] of blocks.entries()) {
+	for (const block of blocks) {
 		const start = (block.index ?? 0) + block[0].length;
-		const end = index + 1 < blocks.length ? (blocks[index + 1].index ?? html.length) : html.length;
-		const chunk = html.slice(start, end);
+		const chunk = html.slice(start, blockEnd(html, start));
 		const label =
 			/<div\b[^>]*class="[^"]*\bkalendarz-numer-dnia\b[^"]*"[^>]*>([\s\S]*?)<\/div>/i.exec(chunk);
 		const day = label ? Number(text(label[1])) : NaN;
