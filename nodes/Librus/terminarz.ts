@@ -35,22 +35,35 @@ function protocolError(check: TerminarzCheck, value?: unknown): LibrusError {
 	return baseProtocolError(check, value);
 }
 
+/**
+ * HTML 4 Latin-1 entity names for code points 160-255, in order.
+ *
+ * Librus encodes the one Polish letter that Latin-1 covers as `&oacute;` and the rest
+ * numerically, so without these names `ó` reaches the user as raw entity text. Generated
+ * from the code points rather than written out: a literal U+00A0 is invisible in a diff,
+ * and a hand-typed table of 96 accented letters cannot be reviewed by eye.
+ */
+const latin1 =
+	'nbsp iexcl cent pound curren yen brvbar sect uml copy ordf laquo not shy reg macr deg plusmn sup2 sup3 acute micro para middot cedil sup1 ordm raquo frac14 frac12 frac34 iquest Agrave Aacute Acirc Atilde Auml Aring AElig Ccedil Egrave Eacute Ecirc Euml Igrave Iacute Icirc Iuml ETH Ntilde Ograve Oacute Ocirc Otilde Ouml times Oslash Ugrave Uacute Ucirc Uuml Yacute THORN szlig agrave aacute acirc atilde auml aring aelig ccedil egrave eacute ecirc euml igrave iacute icirc iuml eth ntilde ograve oacute ocirc otilde ouml divide oslash ugrave uacute ucirc uuml yacute thorn yuml'.split(
+		' ',
+	);
 const named: Record<string, string> = {
 	amp: '&',
 	lt: '<',
 	gt: '>',
 	quot: '"',
 	apos: "'",
-	// Written as an escape: a literal U+00A0 is invisible in a diff and in review.
-	nbsp: '\u00a0',
 };
+for (const [index, name] of latin1.entries()) named[name] = String.fromCodePoint(160 + index);
 export function decodeEntities(value: string): string {
 	return value.replace(/&(#[xX][0-9a-fA-F]+|#\d+|[a-zA-Z]+);/g, (match, name: string) => {
 		const code = name.startsWith('#')
 			? Number(name[1] === 'x' || name[1] === 'X' ? `0x${name.slice(2)}` : name.slice(1))
 			: NaN;
 		if (Number.isInteger(code) && code > 0 && code <= 0x10ffff) return String.fromCodePoint(code);
-		return named[name.toLowerCase()] ?? match;
+		// Exact first: `&Oacute;` and `&oacute;` are different letters. The lowercase
+		// fallback keeps the lenient `&AMP;` spelling working as it did before.
+		return named[name] ?? named[name.toLowerCase()] ?? match;
 	});
 }
 
@@ -71,13 +84,25 @@ function attributes(tag: string): Record<string, string> {
 	return result;
 }
 
-/** The title attribute holds literal `<br />` separated `Etykieta: wartość` pairs. */
+/**
+ * The title attribute holds literal `<br />` separated `Etykieta: wartość` pairs.
+ *
+ * Its values are entity-encoded twice: the grid serves `kt&amp;oacute;re` where the
+ * detail page of the same event serves `kt&oacute;re` for the same description. The
+ * caller has already decoded the attribute once, so a value still carrying an entity
+ * here is content, not markup, and needs the second pass. Without it every field that
+ * only the grid supplies reaches the user as `&oacute;` — which is exactly the entries
+ * that have no detail page to correct them, the free days and the parent-teacher
+ * meetings.
+ */
 function titlePairs(title: string): Record<string, string> {
 	const pairs: Record<string, string> = {};
 	for (const part of title.split(/<br\s*\/?>/i)) {
 		const index = part.indexOf(':');
 		if (index <= 0) continue;
-		pairs[part.slice(0, index).trim().toLocaleLowerCase('pl')] = part.slice(index + 1).trim();
+		pairs[part.slice(0, index).trim().toLocaleLowerCase('pl')] = decodeEntities(
+			part.slice(index + 1),
+		).trim();
 	}
 	return pairs;
 }

@@ -37,6 +37,19 @@ test('reads linked entries with subject, teacher, description, lesson number and
 	);
 });
 
+test('decodes a title value that Librus encoded twice', () => {
+	// Observed live on 2026-09-13: the grid serves `kt&amp;oacute;re` where the detail
+	// page of the same event serves `kt&oacute;re`. The <br /> separator carries only one
+	// level, so splitting still works and only the values need the second pass.
+	const rows = cell(
+		`class="nb" title="Nauczyciel: Marta Przybysz&lt;br /&gt;Opis: Chętne dzieci, kt&amp;oacute;re maj&amp;#261; lornetk&amp;#281;"`,
+		'Wywiad&amp;oacute;wka',
+	);
+	const entry = parseMonth(month(2026, 9, { 9: day(9, rows) }), 2026, 9)[0];
+	assert.equal(entry.description, 'Chętne dzieci, które mają lornetkę');
+	assert.equal(entry.teacher, 'Marta Przybysz');
+});
+
 test('an entry without a link gets a stable synthetic key derived from date and text', () => {
 	const rows = cell('class="nb"', 'Dzień wolny od zajęć');
 	const first = parseMonth(month(2026, 9, { 2: day(2, rows) }), 2026, 9)[0];
