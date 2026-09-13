@@ -42,6 +42,10 @@ returned four current-month entries and hydrated three detail pages.
   the `szczegoly_wolne` free days the design anticipated, and it makes the "unknown kind
   always passes" rule in `matchesType` load-bearing rather than defensive: any non-empty
   type filter would otherwise drop every parent-teacher meeting.
+- The grid encodes its title attribute twice and the entity table covered only the five
+  XML names, so a description reached the user as `kt&oacute;re` where the detail page of
+  the same event gave `które`. Both are fixed; re-check on a fresh account that no entity
+  text survives into the output, especially on an entry with no detail page.
 - Consequence of the synthetic key, not yet observed live: a detail-less entry moved to
   another date reports as a removal plus an addition rather than a change, because
   `pairSynthetic` only pairs within one date. Entries with an id move correctly.
