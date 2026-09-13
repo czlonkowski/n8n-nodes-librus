@@ -373,6 +373,26 @@ test('a baseline records everything, emits nothing and leaves no readable conten
 	assert.equal(Object.keys(state.librusCalendar.events).length, 1);
 });
 
+test('the first hydration of a baselined entry reports only what actually changed', () => {
+	// Live on 2026-09-13 this emitted changedFields ['subject','description','rodzaj','addedAt']
+	// for an edit that touched the description alone. A baseline never hydrates, because it
+	// emits nothing, so the detail fields were absent rather than different.
+	const state = {};
+	const span = window('2026-09', 0, ['2026-09']);
+	run(state, account, span, [entry('szczegoly/1', '2026-09-18')]);
+	assert.equal(state.librusCalendar.events['szczegoly/1'].s.rodzaj, null);
+	const edited = { ...entry('szczegoly/1', '2026-09-18'), description: 'Zakres: ułamki' };
+	// The detail page reflects the same edit; it is the grid tooltip's fuller twin, not a
+	// second source of truth, so both carry the new description.
+	const hydrated = { ...detail('Sprawdzian'), description: 'Zakres: ułamki' };
+	const result = run(state, account, span, [edited], new Map([['szczegoly/1', hydrated]]));
+	assert.equal(result.changes.length, 1);
+	assert.deepEqual(result.changes[0].changedFields, ['description']);
+	// The hydrated values still reach the user, they are just not called changes.
+	assert.equal(result.changes[0].event.rodzaj, 'Sprawdzian');
+	assert.equal(result.changes[0].previous.rodzaj, null);
+});
+
 test('additions and edits emit hydrated snapshots with previous values and changed fields', () => {
 	const state = {};
 	const span = window('2026-09', 0, ['2026-09']);

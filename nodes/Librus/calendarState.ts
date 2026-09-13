@@ -70,9 +70,23 @@ function addMonths(from: string, count: number): string {
  * fingerprint covers the text itself. That keeps best-effort sub-field extraction from
  * ever producing a false "changed".
  */
+/**
+ * The only fields a poll can detect a change in.
+ *
+ * A poll compares fingerprints, so a field outside this list cannot trigger a change and
+ * must not be reported as one. The detail-page fields are the trap: `rodzaj`, `room` and
+ * `addedAt` are absent from a baseline, which never hydrates because it emits nothing, so
+ * diffing them reported three phantom changes on the first real edit of every entry.
+ * Fingerprinting them instead would mean hydrating every entry on every poll, which is
+ * the cost the hybrid design exists to avoid.
+ *
+ * The order is part of the stored fingerprint: changing it re-baselines every workflow.
+ */
+const tracked = ['date', 'text', 'teacher', 'description'] as const satisfies readonly (keyof CalendarSnapshot)[];
+
 export function fingerprint(entry: CalendarEntry): string {
 	return createHash('sha256')
-		.update(JSON.stringify([entry.date, entry.text, entry.teacher, entry.description]))
+		.update(JSON.stringify(tracked.map((field) => entry[field])))
 		.digest('hex')
 		.slice(0, 32);
 }
@@ -250,9 +264,7 @@ export function entrySnapshot(
 }
 
 function diffFields(before: CalendarSnapshot, after: CalendarSnapshot): string[] {
-	return (Object.keys(after) as (keyof CalendarSnapshot)[]).filter(
-		(field) => before[field] !== after[field],
-	);
+	return tracked.filter((field) => before[field] !== after[field]);
 }
 
 function routeOf(key: string): string | null {
