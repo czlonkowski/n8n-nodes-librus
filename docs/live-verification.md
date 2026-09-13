@@ -59,9 +59,11 @@ Testing gotchas, learned the hard way on 2026-09-13:
   evidence that polling is broken. To tell the two apart, read the workflow's
   `staticData` in the instance database: its revision counter advances on every committed
   poll, including a silent one.
-- Editing a source file while `npm run dev` is running rebuilds the node and hot-reloads
-  it, which deactivates an active workflow and persists `active=0`. Re-activate in the UI
-  after every code change, or the next hours of "polling" are polling nothing.
+- Killing the dev server can leave an active workflow persisted as `active=0`, and it
+  stays off after the restart: polling then looks broken for as long as nobody checks.
+  Editing a source file is fine — the rebuild hot-reloads the node and the workflow stays
+  active. So after every restart of `npm run dev`, confirm `active` in the UI or in the
+  database before trusting any polling observation.
 
 1. Confirm the month form: POST `rok`/`miesiac` returns the requested month, and that the grid renders every day of that month with no adjacent-month days. A `numery dni miesiąca` failure means the assumption is wrong — record the shape, do not paste private content.
 2. Record the real `Rodzaj` vocabulary from the emitted output so the free-text filter can become a multi-select later.
