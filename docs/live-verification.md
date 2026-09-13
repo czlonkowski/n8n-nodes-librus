@@ -52,6 +52,17 @@ returned four current-month entries and hydrated three detail pages.
 - Still unobserved: the container markup of a real detail page (item 4), every item from
   5 onwards, and any month other than September 2026.
 
+Testing gotchas, learned the hard way on 2026-09-13:
+
+- A poll trigger that finds nothing returns no data, and n8n then creates **no
+  execution**. An empty execution list is the expected result of a silent poll, not
+  evidence that polling is broken. To tell the two apart, read the workflow's
+  `staticData` in the instance database: its revision counter advances on every committed
+  poll, including a silent one.
+- Editing a source file while `npm run dev` is running rebuilds the node and hot-reloads
+  it, which deactivates an active workflow and persists `active=0`. Re-activate in the UI
+  after every code change, or the next hours of "polling" are polling nothing.
+
 1. Confirm the month form: POST `rok`/`miesiac` returns the requested month, and that the grid renders every day of that month with no adjacent-month days. A `numery dni miesiąca` failure means the assumption is wrong — record the shape, do not paste private content.
 2. Record the real `Rodzaj` vocabulary from the emitted output so the free-text filter can become a multi-select later.
 3. Open a `szczegoly_wolne` entry and confirm its detail page parses; note whether it redirects.
