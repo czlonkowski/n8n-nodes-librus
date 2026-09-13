@@ -1,6 +1,11 @@
 import { configWithoutCloudSupport } from '@n8n/node-cli/eslint';
 
 export default [
+	{
+		// Agent scratch: nested worktrees hold a second copy of these sources, and the
+		// path-scoped overrides below never match it. Flat config ignores .gitignore.
+		ignores: ['.claude/**', '.superpowers/**'],
+	},
 	...configWithoutCloudSupport,
 	{
 		files: ['nodes/Librus/*.node.ts', 'credentials/LibrusSessionApi.credentials.ts'],
