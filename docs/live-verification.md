@@ -58,14 +58,15 @@ Testing gotchas, learned the hard way on 2026-09-13:
   execution**. An empty execution list is the expected result of a silent poll, not
   evidence that polling is broken. The database cannot tell the two apart either: n8n
   calls `saveStaticData` only from the emit path, so a silent poll advances the stored
-  revision counter in memory and never writes it. The persisted value only catches up on
-  an emission, a deactivation, or a clean shutdown. To watch polling live, run the
-  instance with `N8N_LOG_LEVEL=debug` and follow the `Poll trigger initiated` lines.
+  revision counter in memory and never writes it. Emitting is the only flush observed to
+  work: a deactivation and an ordinary stop of the dev server both left the stored counter
+  behind. To watch polling live, run the instance with `N8N_LOG_LEVEL=debug` and follow
+  the `Poll trigger initiated` lines.
 - Losing those in-memory increments to a crash is harmless by construction: a silent poll
   records only what the next scan of the calendar reconstructs, so a rebuilt baseline is
   silent again and emits no duplicates.
-- Killing the dev server can leave an active workflow persisted as `active=0`, and it
-  stays off after the restart: polling then looks broken for as long as nobody checks.
+- Stopping the dev server, gracefully or not, leaves an active workflow persisted as
+  `active=0`, and it stays off after the restart: polling then looks broken for as long as nobody checks.
   Editing a source file is fine — the rebuild hot-reloads the node and the workflow stays
   active. So after every restart of `npm run dev`, confirm `active` in the UI or in the
   database before trusting any polling observation.
