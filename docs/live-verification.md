@@ -24,6 +24,30 @@ Do not store cookies in workflow static data or node output when adding session 
 
 ## Calendar trigger acceptance
 
+Observed on 2026-09-13, one account, one class, September 2026 only. A manual sample
+returned four current-month entries and hydrated three detail pages.
+
+- The grid rendered exactly the 30 days of the requested month with no adjacent-month
+  days: the `numery dni miesiaca` guard did not fire. Item 1 below holds for this month;
+  a month whose grid starts or ends mid-week may still differ, so re-check at a month
+  boundary before trusting it generally.
+- Real `Rodzaj` values seen: `Inne`, `Impreza szkolna`, `Wycieczka`. Partial: one class,
+  one month. Not enough to turn the free-text filter into a multi-select.
+- Detail rows seen: `Data`, `Nr lekcji`, `Nauczyciel`, `Rodzaj`, `Przedmiot`, `Opis`,
+  `Data dodania`. No `Sala` row appeared, so `room` stayed null on every entry; it is
+  still unknown whether any entry kind carries one.
+- A `Wywiadowka` entry carried no detail link at all: no id, no route, so a synthetic
+  `hash/` key, and `rodzaj`, `room` and `addedAt` permanently null. The grid itself
+  supplied its teacher, description and hour. This is a second detail-less kind beyond
+  the `szczegoly_wolne` free days the design anticipated, and it makes the "unknown kind
+  always passes" rule in `matchesType` load-bearing rather than defensive: any non-empty
+  type filter would otherwise drop every parent-teacher meeting.
+- Consequence of the synthetic key, not yet observed live: a detail-less entry moved to
+  another date reports as a removal plus an addition rather than a change, because
+  `pairSynthetic` only pairs within one date. Entries with an id move correctly.
+- Still unobserved: the container markup of a real detail page (item 4), every item from
+  5 onwards, and any month other than September 2026.
+
 1. Confirm the month form: POST `rok`/`miesiac` returns the requested month, and that the grid renders every day of that month with no adjacent-month days. A `numery dni miesiąca` failure means the assumption is wrong — record the shape, do not paste private content.
 2. Record the real `Rodzaj` vocabulary from the emitted output so the free-text filter can become a multi-select later.
 3. Open a `szczegoly_wolne` entry and confirm its detail page parses; note whether it redirects.
