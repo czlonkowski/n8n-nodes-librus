@@ -111,6 +111,28 @@ test('a full final page and a repeated page fail instead of silently truncating'
 		{ code: 'SCAN_INCOMPLETE' },
 	);
 });
+test('the message-path request-count budget stops a scan drawn out by redirects', async () => {
+	// Authentication spends 8 of the 100-request budget. Each inbox page below burns 11 more
+	// (ten redirect hops plus the landing response), so eight full pages leave the counter at
+	// 96. The ninth page's request() call increments past 100 on its fifth hop (97, 98, 99,
+	// 100, 101) — that hop throws before consuming a reply, so only four redirect stubs are
+	// needed to reach it. This exercises `++this.requests > MAX_REQUESTS`, not the deadline
+	// limb: nothing here touches the clock, so the 120-second deadline is nowhere close.
+	const redirectToInbox = () => redirect('https://wiadomosci.librus.pl/api/inbox/messages');
+	const fullPage = (page) => [
+		...Array.from({ length: 10 }, redirectToInbox),
+		ok({ data: Array.from({ length: 50 }, (_, i) => message(`${page}-${i}`)) }),
+	];
+	const replies = [...auth()];
+	for (let page = 1; page <= 8; page++) replies.push(...fullPage(page));
+	replies.push(redirectToInbox(), redirectToInbox(), redirectToInbox(), redirectToInbox());
+	const { client, replies: remaining } = setup(replies);
+	await assert.rejects(
+		client.getMessages({ returnAll: true, limit: 1000, maxPages: 50, includeContent: false }),
+		{ code: 'SCAN_INCOMPLETE' },
+	);
+	assert.equal(remaining.length, 0);
+});
 test('bounded limit returns exactly the requested unique count', async () => {
 	const { client } = setup([
 		...auth(),
@@ -712,3 +734,327 @@ for (const tag of [
 		);
 	});
 }
+
+const { parseMonth } = require('../dist/nodes/Librus/terminarz');
+
+const grid = (year, index, rows = {}) => {
+	const length = new Date(Date.UTC(year, index, 0)).getUTCDate();
+	return Array.from(
+		{ length },
+		(_, i) =>
+			`<div class="kalendarz-dzien"><div class="kalendarz-numer-dnia">${i + 1}</div><table>${
+				rows[i + 1] ?? ''
+			}</table></div>`,
+	).join('');
+};
+const entryRow = (id, body) =>
+	`<tr><td onclick="location.href='/terminarz/szczegoly/${id}'" title="Nauczyciel: Jan Kowalski<br />Opis: Zakres">${body}</td></tr>`;
+
+test('fetches each month with a credential-free POST and returns parsed entries', async () => {
+	const { client, calls } = setup([
+		...auth(),
+		ok(grid(2026, 9, { 18: entryRow(11, 'Matematyka') })),
+		ok(grid(2026, 10, {})),
+	]);
+	const result = await client.getCalendar({ months: ['2026-09', '2026-10'] }, () => []);
+	assert.deepEqual(
+		result.entries.map((entry) => [entry.key, entry.date]),
+		[['szczegoly/11', '2026-09-18']],
+	);
+	const posts = calls.filter((call) => call.method === 'POST');
+	assert.equal(posts.length, 3); // one OAuth login plus two month forms
+	assert.equal(posts[1].url, 'https://synergia.librus.pl/terminarz');
+	assert.deepEqual(
+		[...new URLSearchParams(posts[1].body).entries()],
+		[
+			['rok', '2026'],
+			['miesiac', '9'],
+		],
+	);
+	assert.doesNotMatch(posts[1].body, /synthetic-password/);
+});
+
+test('a month form redirected anywhere else is never followed or replayed', async () => {
+	const { client, calls } = setup([
+		...auth(),
+		redirect('https://synergia.librus.pl/terminarz/inny'),
+	]);
+	await assert.rejects(
+		client.getCalendar({ months: ['2026-09'] }, () => []),
+		{
+			message: /Walidacja: przekierowanie POST/,
+		},
+	);
+	assert.equal(calls.filter((call) => call.url.endsWith('/terminarz/inny')).length, 0);
+});
+
+test('a month form redirected to the login page reports an expired session', async () => {
+	// getCalendar retries exactly once on SESSION_EXPIRED (matching getMessages), so the
+	// second attempt needs its own full authentication cycle before it can fail again.
+	const { client } = setup([
+		...auth(),
+		redirect('https://synergia.librus.pl/loguj'),
+		...auth(),
+		redirect('https://synergia.librus.pl/loguj'),
+	]);
+	await assert.rejects(
+		client.getCalendar({ months: ['2026-09'] }, () => []),
+		{
+			message: /Sesja Librusa wygasła/,
+		},
+	);
+});
+
+test('a login form returned instead of the grid reports an expired session', async () => {
+	const form = '<form><input name="login" /><input name="pass" type="password" /></form>';
+	const { client } = setup([...auth(), ok(form), ...auth(), ok(form)]);
+	await assert.rejects(
+		client.getCalendar({ months: ['2026-09'] }, () => []),
+		{
+			message: /Sesja Librusa wygasła/,
+		},
+	);
+});
+
+test('a broken grid fails with the month in the diagnostics and never returns an empty calendar', async () => {
+	const { client } = setup([...auth(), ok('<html><body>Awaria</body></html>')]);
+	await assert.rejects(
+		client.getCalendar({ months: ['2026-09'] }, () => []),
+		{
+			message: /Walidacja: siatka terminarza.*Miesiąc terminarza: 2026-09/s,
+		},
+	);
+});
+
+test('rejects malformed month windows before touching the network', async () => {
+	const { client } = setup([]);
+	// The calendar path names the calendar settings, not the message-fetching ones.
+	for (const months of [[], ['2026-9'], ['2026-13'], Array(8).fill('2026-09'), 'no'])
+		await assert.rejects(
+			client.getCalendar({ months }, () => []),
+			{
+				code: 'CALENDAR_INVALID_OPTIONS',
+				message: /ustawienia sprawdzania terminarza.*Liczbę miesięcy do przodu/s,
+			},
+		);
+	// The out-of-range year is only reachable after authentication, and reports the same code.
+	await assert.rejects(
+		setup([...auth()]).client.getCalendar({ months: ['1999-09'] }, () => []),
+		{ code: 'CALENDAR_INVALID_OPTIONS' },
+	);
+});
+
+const detailPage = (rows) =>
+	`<div class="container-background"><table><tbody>${rows
+		.map(([label, value]) => `<tr><th>${label}</th><td>${value}</td></tr>`)
+		.join('')}</tbody></table></div>`;
+const sampleDetail = detailPage([
+	['Data', '2026-09-18'],
+	['Rodzaj', 'Sprawdzian'],
+	['Sala', '12'],
+]);
+
+test('hydrates only the selected keys and reports the raw Rodzaj', async () => {
+	const { client, calls } = setup([
+		...auth(),
+		ok(grid(2026, 9, { 18: entryRow(11, 'Matematyka') + entryRow(12, 'Fizyka') })),
+		ok(sampleDetail),
+	]);
+	const result = await client.getCalendar({ months: ['2026-09'] }, () => ['szczegoly/11']);
+	assert.equal(result.details.get('szczegoly/11').rodzaj, 'Sprawdzian');
+	assert.equal(result.details.has('szczegoly/12'), false);
+	assert.equal(calls.at(-1).url, 'https://synergia.librus.pl/terminarz/szczegoly/11');
+});
+
+test('a detail page that is gone is left unresolved so the next poll retries it', async () => {
+	const { client } = setup([
+		...auth(),
+		ok(grid(2026, 9, { 18: entryRow(11, 'Matematyka') })),
+		{ statusCode: 404, headers: {}, body: 'Nie znaleziono' },
+	]);
+	const result = await client.getCalendar({ months: ['2026-09'] }, () => ['szczegoly/11']);
+	assert.equal(result.details.has('szczegoly/11'), false);
+});
+
+test('an entry with no detail link resolves to null so it can still be committed', async () => {
+	const row = '<tr><td>Dzień wolny</td></tr>';
+	const { client, calls } = setup([...auth(), ok(grid(2026, 9, { 2: row }))]);
+	const scanned = await client.getCalendar({ months: ['2026-09'] }, (entries) =>
+		entries.map((entry) => entry.key),
+	);
+	const [key] = [...scanned.details.keys()];
+	assert.match(key, /^hash\//);
+	assert.equal(scanned.details.get(key), null);
+	assert.equal(calls.filter((call) => call.url.includes('/terminarz/szczegoly')).length, 0);
+});
+
+test('hydration is bounded, and unhydrated keys stay unresolved', async () => {
+	const rows = Object.fromEntries(
+		Array.from({ length: 30 }, (_, day) => [
+			day + 1,
+			entryRow(day + 1, 'Test') + entryRow(day + 101, 'Test'),
+		]),
+	);
+	const { client } = setup([
+		...auth(),
+		ok(grid(2026, 9, rows)),
+		...Array(50).fill(ok(sampleDetail)),
+	]);
+	const result = await client.getCalendar({ months: ['2026-09'] }, (entries) =>
+		entries.map((entry) => entry.key),
+	);
+	assert.equal(result.details.size, 50);
+});
+
+test('link-less entries resolve to null without consuming a detail slot', async () => {
+	// 50 link-less rows come first, then three linked ones. A budget that counted the
+	// synthetic keys would spend every slot before reaching a single real detail page.
+	const rows = Object.fromEntries([
+		...Array.from({ length: 25 }, (_, i) => [
+			i + 1,
+			`<tr><td>Dzień wolny ${i + 1}a</td></tr><tr><td>Dzień wolny ${i + 1}b</td></tr>`,
+		]),
+		...Array.from({ length: 3 }, (_, i) => [26 + i, entryRow(200 + i, 'Matematyka')]),
+	]);
+	const { client, calls } = setup([
+		...auth(),
+		ok(grid(2026, 9, rows)),
+		...Array(3).fill(ok(sampleDetail)),
+	]);
+	const result = await client.getCalendar({ months: ['2026-09'] }, (entries) =>
+		entries.map((entry) => entry.key),
+	);
+	assert.equal(result.details.size, 53);
+	assert.equal(calls.filter((call) => call.url.includes('/terminarz/szczegoly/')).length, 3);
+	for (const id of [200, 201, 202])
+		assert.equal(result.details.get(`szczegoly/${id}`).rodzaj, 'Sprawdzian');
+});
+
+test('a session expiry late in hydration leaves the retry a full request budget', async () => {
+	// A full window costs about 8 (login) + 7 (months) + 50 (details) requests. On one
+	// shared counter the second attempt would run out well before finishing.
+	const months = Array.from({ length: 7 }, (_, i) => `2026-0${i + 1}`);
+	const rows = Object.fromEntries(
+		Array.from({ length: 25 }, (_, i) => [
+			i + 1,
+			entryRow(i + 1, 'Matematyka') + entryRow(i + 101, 'Fizyka'),
+		]),
+	);
+	const january = () => [
+		ok(grid(2026, 1, rows)),
+		...months.slice(1).map((month, i) => ok(grid(2026, i + 2, {}))),
+	];
+	const loginForm = '<form><input name="login" /><input name="pass" type="password" /></form>';
+	const { client, calls } = setup([
+		...auth(),
+		...january(),
+		...Array(49).fill(ok(sampleDetail)),
+		ok(loginForm), // the 50th detail page comes back as a login form
+		...auth(),
+		...january(),
+		...Array(50).fill(ok(sampleDetail)),
+	]);
+	const result = await client.getCalendar({ months }, (entries) =>
+		entries.map((entry) => entry.key),
+	);
+	assert.equal(result.details.size, 50);
+	assert.equal(calls.length, 130); // both attempts ran to completion: 65 requests each
+});
+
+test('a detail page redirected to another Synergia page is never parsed as a detail', async () => {
+	// A GET follows redirects, so without a final-URL check this table would be hydrated
+	// onto the event: two th/td rows are all `parseEventDetail` requires.
+	const otherPage =
+		'<div><table><tr><th>Przedmiot</th><td>Matematyka</td></tr>' +
+		'<tr><th>Ocena</th><td>5</td></tr></table></div>';
+	const { client } = setup([
+		...auth(),
+		ok(grid(2026, 9, { 18: entryRow(11, 'Matematyka') })),
+		redirect('https://synergia.librus.pl/przegladaj_oceny/uczen'),
+		ok(otherPage),
+	]);
+	await assert.rejects(
+		client.getCalendar({ months: ['2026-09'] }, () => ['szczegoly/11']),
+		(error) => {
+			assert.equal(error.code, 'PROTOCOL_ERROR');
+			assert.match(error.message, /Walidacja: adres wydarzenia terminarza/);
+			return true;
+		},
+	);
+});
+
+test('hydration stops on the remaining request budget instead of failing the whole poll', async () => {
+	// Every detail page takes one redirect hop, so a fetch costs two requests. Authentication
+	// (8) and one month (1) leave 91 of the 100-request budget; hydration keeps fetching
+	// while at least 11 remain (one fetch plus the ten redirect hops it may follow), so it
+	// stops after 41 entries with 9 unspent. The rest stay unresolved for the next poll —
+	// exhausting the budget here would throw away the entire scan instead.
+	const ids = [];
+	for (let day = 1; day <= 25; day++) ids.push(day, day + 100);
+	const rows = Object.fromEntries(
+		Array.from({ length: 25 }, (_, i) => [
+			i + 1,
+			entryRow(i + 1, 'Matematyka') + entryRow(i + 101, 'Fizyka'),
+		]),
+	);
+	const { client, calls, replies } = setup([
+		...auth(),
+		ok(grid(2026, 9, rows)),
+		...ids.flatMap((id) => [
+			redirect(`https://synergia.librus.pl/terminarz/szczegoly/${id}`),
+			ok(sampleDetail),
+		]),
+	]);
+	const result = await client.getCalendar({ months: ['2026-09'] }, (entries) =>
+		entries.map((entry) => entry.key),
+	);
+	assert.equal(result.details.size, 41);
+	assert.equal(result.details.get(`szczegoly/${ids[40]}`).rodzaj, 'Sprawdzian');
+	assert.equal(result.details.has(`szczegoly/${ids[41]}`), false);
+	assert.equal(calls.length, 91);
+	assert.equal(replies.length, (50 - 41) * 2); // nine entries were never fetched
+});
+
+test('an exhausted calendar budget names the month window, not the inbox page limit', async (t) => {
+	// The request cap can no longer be reached during hydration, but the 120-second
+	// deadline still bounds the operation. Mock the clock so it elapses deterministically.
+	t.mock.timers.enable({ apis: ['Date'] });
+	t.mock.timers.setTime(Date.parse('2026-09-12T08:00:00Z'));
+	const replies = [...auth(), ok(grid(2026, 9, { 18: entryRow(11, 'Matematyka') }))];
+	const client = new LibrusClient(async () => {
+		t.mock.timers.tick(30000); // four requests spend the whole 120-second deadline
+		assert.ok(replies.length, 'Unexpected additional request');
+		return replies.shift();
+	}, login);
+	await assert.rejects(
+		client.getCalendar({ months: ['2026-09'] }, (entries) => entries.map((entry) => entry.key)),
+		(error) => {
+			assert.equal(error.code, 'CALENDAR_SCAN_INCOMPLETE');
+			assert.match(error.message, /Zmniejsz Liczbę miesięcy do przodu/);
+			assert.doesNotMatch(error.message, /liczbę stron/i);
+			return true;
+		},
+	);
+});
+
+test('an expired session during hydration restarts scan and selection once', async () => {
+	let selections = 0;
+	const { client } = setup([
+		...auth(),
+		ok(grid(2026, 9, { 18: entryRow(11, 'Matematyka') })),
+		redirect('https://synergia.librus.pl/loguj'),
+		// The detail request is a GET, so `request()` follows this redirect itself
+		// (only a POST redirect to /loguj short-circuits without following). The next
+		// reply is what the follow lands on: a terminal login-page response at /loguj.
+		ok('<form><input name="login" /><input name="pass" type="password" /></form>'),
+		...auth(),
+		ok(grid(2026, 9, { 18: entryRow(11, 'Matematyka') })),
+		ok(sampleDetail),
+	]);
+	const result = await client.getCalendar({ months: ['2026-09'] }, () => {
+		selections += 1;
+		return ['szczegoly/11'];
+	});
+	assert.equal(selections, 2);
+	assert.equal(result.details.get('szczegoly/11').rodzaj, 'Sprawdzian');
+});

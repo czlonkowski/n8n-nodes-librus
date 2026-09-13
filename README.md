@@ -2,7 +2,7 @@
 
 # Librus dla n8n
 
-Pobieraj wiadomości z Librus Synergia i uruchamiaj automatyzacje po otrzymaniu nowych wiadomości. Paczka zawiera dwa węzły, dostępne na wspólnej karcie **Librus**: akcje pobierania wiadomości oraz zdarzenie **Nowa wiadomość**, które uruchamia workflow.
+Pobieraj wiadomości z Librus Synergia i uruchamiaj automatyzacje po otrzymaniu nowych wiadomości albo po zmianach w terminarzu. Paczka zawiera dwa węzły, dostępne na wspólnej karcie **Librus**: akcje pobierania wiadomości oraz zdarzenia wyzwalające workflow — **Nowa wiadomość**, **Nowe wydarzenie w terminarzu** i **Zmiana wydarzenia w terminarzu**.
 
 To nieoficjalna, eksperymentalna integracja do **samodzielnie hostowanego n8n**. Nie jest dostępna w n8n Cloud. Instancja n8n musi korzystać z Node.js 24 lub nowszego.
 
@@ -66,6 +66,24 @@ Trigger domyślnie zwraca metadane i skrócony podgląd. Aby dołączyć pełną
 ```
 
 Przykładowy workflow: **Librus — Nowa wiadomość → Librus (Pobierz treść wiadomości) → wybrany kanał powiadomień**. Jeśli wystarczy temat i podgląd, pomiń Pobierz treść wiadomości.
+
+## Automatyzacja po zmianach w terminarzu
+
+1. Wyszukaj **Librus Trigger** i wybierz zdarzenie **Nowe wydarzenie w terminarzu** albo **Zmiana wydarzenia w terminarzu** oraz zapisane dane logowania.
+2. Ustaw **Liczba miesięcy do przodu** — ile miesięcy po bieżącym miesiącu sprawdzać (0–6, domyślnie 1). Każdy dodatkowy miesiąc to jedno kolejne zapytanie do Librusa; wydarzeń spoza tego zakresu węzeł nie wykryje.
+3. Opcjonalnie wypełnij **Rodzaje wydarzeń** listą rodzajów po przecinku (np. `Sprawdzian, Kartkówka`), dopasowywaną bez rozróżniania wielkości liter. Puste pole przepuszcza wszystkie wydarzenia. **Wydarzenie o nieznanym rodzaju zawsze przechodzi przez filtr** — dotyczy to też usuniętych wydarzeń, których szczegółów węzeł nie zdążył jeszcze pobrać — żeby filtr nigdy nie zgubił odwołanego sprawdzianu.
+4. Ustaw **Poll Times** na co najmniej 15 minut.
+5. Ręcznie przetestuj węzeł. Zwróci do pięciu najbliższych wydarzeń z bieżącego miesiąca jako próbkę (`changeType: "sample"`) i nie zmieni historii. Próbka **celowo pomija filtr Rodzaje wydarzeń** — dzięki temu odczytasz z wyniku prawdziwe wartości pola `rodzaj` i wpiszesz je do filtra, a wąski filtr nie zwróci pustej próbki wyglądającej na zepsute połączenie.
+6. Dodaj dalsze kroki i opublikuj/aktywuj workflow.
+
+**Pierwsze automatyczne sprawdzenie zapamiętuje obecny terminarz bez uruchamiania workflow dla już istniejących wydarzeń.** Kolejne sprawdzenia porównują terminarz z zapamiętanym stanem:
+
+- **Nowe wydarzenie w terminarzu** uruchamia się, gdy w terminarzu pojawi się wydarzenie, którego wcześniej nie było.
+- **Zmiana wydarzenia w terminarzu** uruchamia się dla edycji istniejącego wydarzenia (np. zmiana opisu albo przeniesienie na inny dzień) **oraz dla wydarzeń, które zniknęły z terminarza** — usunięcie lub odwołanie wydarzenia trafia na to samo zdarzenie co zmiana (`changeType: "removed"`), a nie na osobne zdarzenie.
+
+Każdy element zawiera m.in. `changeType`, `eventKey`, `eventId`, `route`, `date`, `subject`, `teacher`, `description`, `rodzaj`, `room`, `addedAt`, `details`, `changedFields` oraz `previous`; dla nowych wydarzeń te dwa ostatnie pola są puste (`changedFields: []`, `previous: null`), a przy zmianach niosą listę zmienionych pól i poprzednią wersję, przy usunięciach zaś poprzednią wersję.
+
+Wykrywanie zmian opiera się wyłącznie na tym, co pokazuje siatka terminarza — na dacie, tekście komórki, nauczycielu i opisie. Edycja widoczna tylko na stronie szczegółów wydarzenia (np. sama zmiana sali) nie wywoła zdarzenia zmiany, dopóki nie zajdzie razem z inną, widoczną w siatce edycją. Usunięcie wydarzenia nigdy nie niesie pola `details` (jest `null`) — to, co zniknęło, opisuje pole `previous`.
 
 ## Ograniczenia i rozwiązywanie problemów
 

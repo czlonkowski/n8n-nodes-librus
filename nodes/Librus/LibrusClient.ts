@@ -1,5 +1,15 @@
 import { CookieJar } from 'tough-cookie';
 
+import {
+	type AuthDestination,
+	type AuthStage,
+	LibrusError,
+	protocolError as baseProtocolError,
+	safeError,
+} from './errors';
+import { parseEventDetail, parseMonth, type CalendarDetail, type CalendarEntry } from './terminarz';
+export { LibrusError, safeError };
+
 export interface Request {
 	url: string;
 	method: 'GET' | 'POST';
@@ -27,6 +37,14 @@ export interface Scan {
 	contentSource?: ContentSource;
 	readStatus?: ReadStatus;
 }
+export interface CalendarScan {
+	months: string[]; // 'YYYY-MM', 1..7 entries, ascending
+}
+export type CalendarSelect = (entries: CalendarEntry[]) => string[];
+export interface CalendarResult {
+	entries: CalendarEntry[];
+	details: Map<string, CalendarDetail | null>;
+}
 export interface Message {
 	messageId: string;
 	senderFirstName: string;
@@ -42,62 +60,6 @@ export interface Message {
 	contentSource?: ContentSource;
 }
 
-const messages: Record<string, string> = {
-	UNSAFE_URL: 'Librus wskazał niedozwolony adres. Nie wysłano do niego zapytania.',
-	TRANSPORT_ERROR:
-		'Nie udało się połączyć z Librusem. Sprawdź połączenie i spróbuj ponownie później.',
-	PROTOCOL_ERROR:
-		'Librus zwrócił odpowiedź w nieoczekiwanym formacie. Integracja może wymagać aktualizacji.',
-	AUTH_FAILED: 'Librus odrzucił logowanie. Sprawdź login i hasło na stronie Librusa.',
-	ACTION_REQUIRED: 'Zaloguj się na stronie Librusa i uzupełnij wymagane potwierdzenia konta.',
-	SESSION_EXPIRED: 'Sesja Librusa wygasła podczas zapytania.',
-	RATE_LIMITED: 'Librus ogranicza liczbę zapytań. Odczekaj przed kolejną próbą.',
-	ACCESS_DENIED: 'Librus odmówił dostępu. Sprawdź uprawnienia konta na stronie Librusa.',
-	SERVICE_ERROR: 'Librus jest niedostępny lub zwrócił nieoczekiwany status HTTP.',
-	SCAN_INCOMPLETE:
-		'Nie udało się sprawdzić całej skrzynki w wyznaczonych granicach. Zwiększ Maksymalną liczbę stron lub ogranicz liczbę pobieranych wiadomości.',
-	FULL_CONTENT_LIMIT:
-		'W jednym wykonaniu można pobrać pełną treść maksymalnie 50 wiadomości. Wyłącz Pobierz wszystkie i ustaw Limit na 50 lub mniej.',
-	INVALID_OPTIONS: 'Nieprawidłowe dane logowania do Librusa lub ustawienia pobierania wiadomości.',
-	TRIGGER_STATE_INVALID:
-		'Zapisana historia wykrytych wiadomości jest nieprawidłowa. Utwórz ponownie węzeł Nowa wiadomość, aby zapamiętać aktualną skrzynkę.',
-	TRIGGER_STATE_LIMIT:
-		'Osiągnięto limit historii 10 000 wiadomości. Utwórz ponownie węzeł Nowa wiadomość, aby zapamiętać aktualną skrzynkę.',
-};
-type AuthStage =
-	| 'rozpoczęcie logowania'
-	| 'przesłanie danych logowania'
-	| 'kontynuacja autoryzacji'
-	| 'otwarcie skrzynki';
-type AuthDestination =
-	| 'autoryzacja OAuth'
-	| 'powrót OAuth do Synergii'
-	| 'logowanie do Synergii'
-	| 'strona Synergii'
-	| 'serwis wiadomości'
-	| 'inna dozwolona strona';
-
-export class LibrusError extends Error {
-	constructor(
-		public readonly code: string,
-		stage?: AuthStage,
-		destination?: AuthDestination,
-		rejection?:
-			| 'adres bez HTTPS'
-			| 'dane logowania w adresie URL'
-			| 'niestandardowy port'
-			| 'nierozpoznana domena',
-	) {
-		super(
-			(messages[code] ?? messages.PROTOCOL_ERROR) +
-				(stage ? ` [Etap: ${stage}; strona: ${destination}]` : '') +
-				(rejection ? ` [Odrzucone przekierowanie: ${rejection}]` : ''),
-		);
-	}
-}
-export function safeError(error: unknown): LibrusError {
-	return error instanceof LibrusError ? error : new LibrusError('PROTOCOL_ERROR');
-}
 // Diagnostics contain only code-owned labels and primitive type names, never values.
 type ProtocolCheck =
 	| `message.${keyof Message}`
@@ -113,14 +75,13 @@ type ProtocolCheck =
 	| 'adres przekierowania'
 	| 'limit przekierowań'
 	| 'adres skrzynki'
+	| 'adres terminarza'
+	| 'adres wydarzenia terminarza'
 	| 'obiekt odpowiedzi skrzynki'
 	| 'tablica wiadomości'
 	| 'liczba wiadomości na stronie';
 function protocolError(check: ProtocolCheck, value?: unknown): LibrusError {
-	const type = value === null ? 'null' : Array.isArray(value) ? 'array' : typeof value;
-	const error = new LibrusError('PROTOCOL_ERROR');
-	error.message += ` [Walidacja: ${check}; otrzymany typ: ${type}]`;
-	return error;
+	return baseProtocolError(check, value);
 }
 const allowedHosts = new Set([
 	'portal.librus.pl',
@@ -128,6 +89,23 @@ const allowedHosts = new Set([
 	'api.librus.pl',
 	'wiadomosci.librus.pl',
 ]);
+// Credential-free POST targets. The password may still only leave through the OAuth route.
+const allowedPostUrls = new Set(['https://synergia.librus.pl/terminarz']);
+/** Detail fetches per calendar poll. calendarState.MAX_HYDRATION must not exceed this. */
+const MAX_DETAILS = 50;
+/** HTTP requests one operation attempt may make, redirect hops included. */
+const MAX_REQUESTS = 100;
+/** Redirect hops one `request()` call follows before it gives up. */
+const MAX_REDIRECTS = 10;
+/**
+ * Requests to leave unspent before starting another detail fetch: the fetch itself plus
+ * every redirect hop it may follow (1 + MAX_REDIRECTS). Below that, hydration stops
+ * instead of risking the budget error mid-fetch. Keys left unfetched are simply absent
+ * from the details map, which the state module retries on the next poll, so the poll
+ * still commits; throwing here would discard the whole scan and make a persistent
+ * redirect pattern retry the same backlog forever.
+ */
+const DETAIL_HEADROOM = MAX_REDIRECTS + 1;
 function checkedUrl(value: string, base?: string): URL {
 	let url: URL;
 	try {
@@ -276,6 +254,12 @@ export class LibrusClient {
 	private jar = new CookieJar();
 	private deadline = 0;
 	private requests = 0;
+	/**
+	 * Which exhausted-budget message the current operation should raise. The message
+	 * names the parameter the user can actually turn down, and the calendar events have
+	 * no "Maksymalna liczba stron".
+	 */
+	private budgetCode: 'SCAN_INCOMPLETE' | 'CALENDAR_SCAN_INCOMPLETE' = 'SCAN_INCOMPLETE';
 	constructor(
 		private readonly transport: Transport,
 		private readonly login: Login,
@@ -283,10 +267,15 @@ export class LibrusClient {
 
 	private async request(value: string, body?: string): Promise<Response & { url: URL }> {
 		let url = checkedUrl(value);
-		for (let hop = 0; hop <= 10; hop++) {
-			if (++this.requests > 100 || Date.now() >= this.deadline)
-				throw new LibrusError('SCAN_INCOMPLETE');
-			if (body !== undefined && !authUrl(url)) throw new LibrusError('UNSAFE_URL');
+		for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+			if (++this.requests > MAX_REQUESTS || Date.now() >= this.deadline)
+				throw new LibrusError(this.budgetCode);
+			if (
+				body !== undefined &&
+				!authUrl(url) &&
+				!allowedPostUrls.has(`${url.origin}${url.pathname}`)
+			)
+				throw new LibrusError('UNSAFE_URL');
 			const headers: Record<string, string> = {
 				Accept: 'application/json, text/html;q=0.9',
 				'User-Agent': 'n8n-nodes-librus/0.1',
@@ -295,7 +284,7 @@ export class LibrusClient {
 			if (cookie) headers.Cookie = cookie;
 			if (body !== undefined) headers['Content-Type'] = 'application/x-www-form-urlencoded';
 			const remaining = this.deadline - Date.now();
-			if (remaining <= 0) throw new LibrusError('SCAN_INCOMPLETE');
+			if (remaining <= 0) throw new LibrusError(this.budgetCode);
 			let response: Response;
 			try {
 				response = await this.transport({
@@ -328,7 +317,20 @@ export class LibrusClient {
 			}
 			if ([301, 302, 303, 307, 308].includes(response.statusCode)) {
 				// Never replay a credential-bearing POST, including on a same-host redirect.
-				if (body !== undefined) throw protocolError('przekierowanie POST');
+				if (body !== undefined) {
+					const location = normalized.location;
+					if (!authUrl(url) && typeof location === 'string') {
+						let target: URL | undefined;
+						try {
+							target = checkedRedirect(location, url.href);
+						} catch {
+							target = undefined;
+						}
+						if (target && (authUrl(target) || /^\/loguj(?:\/|$)/.test(target.pathname)))
+							throw new LibrusError('SESSION_EXPIRED');
+					}
+					throw protocolError('przekierowanie POST');
+				}
 				const location = normalized.location;
 				if (typeof location !== 'string') throw protocolError('adres przekierowania', location);
 				url = checkedRedirect(location, url.href);
@@ -344,8 +346,11 @@ export class LibrusClient {
 			)
 				throw new LibrusError('SESSION_EXPIRED');
 			if (response.statusCode === 403) throw new LibrusError('ACCESS_DENIED');
-			if (response.statusCode < 200 || response.statusCode >= 300)
-				throw new LibrusError('SERVICE_ERROR');
+			if (response.statusCode < 200 || response.statusCode >= 300) {
+				const error = new LibrusError('SERVICE_ERROR');
+				error.status = response.statusCode;
+				throw error;
+			}
 			return { ...response, url };
 		}
 		throw protocolError('limit przekierowań');
@@ -405,6 +410,7 @@ export class LibrusClient {
 				options.contentSource !== 'full')
 		)
 			throw new LibrusError('INVALID_OPTIONS');
+		this.budgetCode = 'SCAN_INCOMPLETE';
 		this.deadline = Date.now() + 120000;
 		this.requests = 0;
 		await this.authenticate();
@@ -441,6 +447,7 @@ export class LibrusClient {
 			!/^[A-Za-z0-9_-]+$/.test(messageId)
 		)
 			throw new LibrusError('INVALID_OPTIONS');
+		this.budgetCode = 'SCAN_INCOMPLETE';
 		this.deadline = Date.now() + 120000;
 		this.requests = 0;
 		await this.authenticate();
@@ -524,5 +531,122 @@ export class LibrusClient {
 			}
 		}
 		throw new LibrusError('SCAN_INCOMPLETE');
+	}
+
+	private async monthPage(year: number, month: number): Promise<CalendarEntry[]> {
+		const body = new URLSearchParams({
+			rok: String(year),
+			miesiac: String(month),
+		}).toString();
+		const response = await this.request('https://synergia.librus.pl/terminarz', body);
+		if (
+			authUrl(response.url) ||
+			/\/loguj(?:\/|$)/.test(response.url.pathname) ||
+			isLoginForm(response.body)
+		)
+			throw new LibrusError('SESSION_EXPIRED');
+		if (
+			response.url.hostname !== 'synergia.librus.pl' ||
+			!/^\/terminarz\/?$/.test(response.url.pathname)
+		)
+			throw protocolError('adres terminarza');
+		try {
+			return parseMonth(response.body, year, month);
+		} catch (error) {
+			if (error instanceof LibrusError && error.code === 'PROTOCOL_ERROR')
+				error.message += ` [Miesiąc terminarza: ${year}-${String(month).padStart(2, '0')}]`;
+			throw error;
+		}
+	}
+
+	private async eventDetail(route: string, id: string): Promise<CalendarDetail | null> {
+		if ((route !== 'szczegoly' && route !== 'szczegoly_wolne') || !/^\d+$/.test(id))
+			throw new LibrusError('PROTOCOL_ERROR');
+		const path = `/terminarz/${route}/${id}`;
+		let response;
+		try {
+			response = await this.request(`https://synergia.librus.pl${path}`);
+		} catch (error) {
+			// The entry disappeared between the scan and hydration. Leave it unresolved.
+			if (error instanceof LibrusError && error.code === 'SERVICE_ERROR' && error.status === 404)
+				return null;
+			throw error;
+		}
+		if (
+			authUrl(response.url) ||
+			/\/loguj(?:\/|$)/.test(response.url.pathname) ||
+			isLoginForm(response.body)
+		)
+			throw new LibrusError('SESSION_EXPIRED');
+		// A GET follows redirects, so the body may come from another allowed page entirely.
+		// Two th/td rows are enough for `parseEventDetail` to accept it, so the entry would
+		// be hydrated from whatever that page happens to contain. The month form is checked
+		// the same way.
+		if (response.url.hostname !== 'synergia.librus.pl' || response.url.pathname !== path)
+			throw protocolError('adres wydarzenia terminarza');
+		return parseEventDetail(response.body);
+	}
+
+	async getCalendar(options: CalendarScan, select: CalendarSelect): Promise<CalendarResult> {
+		if (
+			!this.login.username ||
+			!this.login.password ||
+			typeof select !== 'function' ||
+			!Array.isArray(options.months) ||
+			options.months.length < 1 ||
+			options.months.length > 7 ||
+			options.months.some((month) => !/^\d{4}-(?:0[1-9]|1[0-2])$/.test(month))
+		)
+			throw new LibrusError('CALENDAR_INVALID_OPTIONS');
+		this.budgetCode = 'CALENDAR_SCAN_INCOMPLETE';
+		this.deadline = Date.now() + 120000;
+		this.requests = 0;
+		await this.authenticate();
+		for (let attempt = 0; attempt < 2; attempt++) {
+			try {
+				const entries: CalendarEntry[] = [];
+				for (const month of options.months) {
+					const [year, index] = month.split('-').map(Number);
+					if (year < 2000 || year > 2100) throw new LibrusError('CALENDAR_INVALID_OPTIONS');
+					entries.push(...(await this.monthPage(year, index)));
+				}
+				const known = new Map(entries.map((entry) => [entry.key, entry]));
+				const selected = select(entries);
+				if (!Array.isArray(selected)) throw new LibrusError('CALENDAR_INVALID_OPTIONS');
+				const details = new Map<string, CalendarDetail | null>();
+				// A link-less (synthetic-key) entry has nothing to fetch, so it is resolved
+				// as null here and never consumes one of the MAX_DETAILS slots — a real
+				// backlog of fetchable entries drains that much faster.
+				const fetchable: { key: string; route: 'szczegoly' | 'szczegoly_wolne'; id: string }[] = [];
+				for (const key of selected) {
+					const entry = known.get(key);
+					if (!entry) continue;
+					if (!entry.route || !entry.eventId) {
+						details.set(key, null);
+						continue;
+					}
+					fetchable.push({ key, route: entry.route, id: entry.eventId });
+				}
+				// Bounded independently of the caller, by the detail cap and by what is left
+				// of the request budget. Keys left out stay unresolved, which the state
+				// module treats as "retry on the next poll".
+				for (const { key, route, id } of fetchable.slice(0, MAX_DETAILS)) {
+					if (MAX_REQUESTS - this.requests < DETAIL_HEADROOM) break;
+					const detail = await this.eventDetail(route, id);
+					if (detail !== null) details.set(key, detail);
+				}
+				return { entries, details };
+			} catch (error) {
+				if (!(error instanceof LibrusError) || error.code !== 'SESSION_EXPIRED' || attempt === 1)
+					throw error;
+				// A full window costs roughly 8 (login) + 7 (months) + 50 (details) requests,
+				// so a session expiry late in hydration would leave the retry unable to
+				// finish on a shared counter. Each attempt gets its own request budget; the
+				// 120-second deadline, untouched, still bounds the operation as a whole.
+				this.requests = 0;
+				await this.authenticate();
+			}
+		}
+		throw new LibrusError('SESSION_EXPIRED');
 	}
 }
