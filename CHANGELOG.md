@@ -20,6 +20,8 @@
 - Rename the parameter label to Liczba miesięcy do przodu, fall back to Nowa wiadomość in the node subtitle for an unexpected event value, and keep internal planning documents out of the published npm package.
 - Describe both message and calendar automation in the package description.
 - Fix calendar state pruning keeping records for months beyond a shrunk window indefinitely: prune against the exact set of scanned months instead of only the window's start.
+- Decode named HTML entities for code points 160-255 and the twice-encoded month-grid tooltip, so Polish letters no longer reach the output as raw entity text; this affected above all the entries with no detail page to correct them, the free days and the parent-teacher meetings.
+- Report as changed only the fields a poll can detect a change in, so the first edit of an entry no longer also reports the detail-page fields that the silent baseline had simply never fetched.
 
 ## 0.1.5 — 2026-09-08
 
