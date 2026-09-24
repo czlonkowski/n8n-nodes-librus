@@ -18,6 +18,12 @@ import {
 import { createTransport, createCredentialTestTransport } from './transport';
 import { sharedSessions } from './sessionCache';
 import { parseProxy, proxyUrl } from './proxy';
+import { entrySnapshot, monthWindow } from './calendarState';
+
+/** Today's date in Poland, where Librus dates live. */
+function todayInPoland(now = new Date()): string {
+	return new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Warsaw' }).format(now);
+}
 
 export class Librus implements INodeType {
 	description: INodeTypeDescription = {
@@ -27,9 +33,9 @@ export class Librus implements INodeType {
 		group: ['input'],
 		version: 1,
 		subtitle:
-			'={{$parameter["operation"] === "getContent" ? "Pobierz treść wiadomości" : "Pobierz wiadomości"}}',
+			'={{$parameter["resource"] === "calendar" ? "Pobierz wydarzenia z terminarza" : ($parameter["operation"] === "getContent" ? "Pobierz treść wiadomości" : "Pobierz wiadomości")}}',
 		description:
-			'Pobieraj wiadomości i ich pełną treść z Librus Synergia oraz uruchamiaj workflow po otrzymaniu nowych wiadomości',
+			'Pobieraj wiadomości, ich pełną treść i wydarzenia z terminarza Librus Synergia oraz uruchamiaj workflow po otrzymaniu nowych wiadomości',
 		defaults: { name: 'Librus' },
 		inputs: [NodeConnectionTypes.Main],
 		outputs: [NodeConnectionTypes.Main],
@@ -47,8 +53,52 @@ export class Librus implements INodeType {
 				name: 'resource',
 				type: 'options',
 				noDataExpression: true,
-				options: [{ name: 'Wiadomość', value: 'message' }],
+				options: [
+					{ name: 'Wiadomość', value: 'message' },
+					{ name: 'Terminarz', value: 'calendar' },
+				],
 				default: 'message',
+			},
+			{
+				displayName: 'Operacja',
+				name: 'operation',
+				type: 'options',
+				noDataExpression: true,
+				displayOptions: { show: { resource: ['calendar'] } },
+				options: [
+					{
+						name: 'Pobierz wydarzenia',
+						value: 'getEvents',
+						description: 'Pobierz wpisy z terminarza z bieżącego i kolejnych miesięcy',
+						action: 'Pobierz wydarzenia z terminarza',
+					},
+				],
+				default: 'getEvents',
+			},
+			{
+				displayName: 'Liczba kolejnych miesięcy',
+				name: 'monthsAhead',
+				type: 'number',
+				default: 2,
+				typeOptions: { minValue: 0, maxValue: 6 },
+				displayOptions: { show: { resource: ['calendar'], operation: ['getEvents'] } },
+				description: 'Ile miesięcy po bieżącym sprawdzić. 0 oznacza tylko bieżący miesiąc.',
+			},
+			{
+				displayName: 'Tylko nadchodzące',
+				name: 'onlyUpcoming',
+				type: 'boolean',
+				default: true,
+				displayOptions: { show: { resource: ['calendar'], operation: ['getEvents'] } },
+				description: 'Pomiń wpisy z datą wcześniejszą niż dzisiejsza (czas polski)',
+			},
+			{
+				displayName:
+					'Szczegóły wpisu (rodzaj, sala, nauczyciel, opis) są pobierane dla maksymalnie 50 wpisów w jednym wykonaniu. Pozostałe mają tylko dane z siatki terminarza i pole details równe null.',
+				name: 'calendarNotice',
+				type: 'notice',
+				default: '',
+				displayOptions: { show: { resource: ['calendar'], operation: ['getEvents'] } },
 			},
 			{
 				displayName: 'Operacja',
@@ -213,11 +263,11 @@ export class Librus implements INodeType {
 		const output: INodeExecutionData[] = [];
 		for (let itemIndex = 0; itemIndex < this.getInputData().length; itemIndex++) {
 			try {
+				const resource = this.getNodeParameter('resource', itemIndex);
+				const operation = this.getNodeParameter('operation', itemIndex) as string;
 				if (
-					this.getNodeParameter('resource', itemIndex) !== 'message' ||
-					!['getAll', 'getContent'].includes(
-						this.getNodeParameter('operation', itemIndex) as string,
-					)
+					!(resource === 'message' && ['getAll', 'getContent'].includes(operation)) &&
+					!(resource === 'calendar' && operation === 'getEvents')
 				)
 					throw new LibrusError('INVALID_OPTIONS');
 				const credentials = await this.getCredentials('librusSessionApi', itemIndex);
@@ -233,7 +283,36 @@ export class Librus implements INodeType {
 						proxy: proxy && proxyUrl(proxy),
 					},
 				);
-				if (this.getNodeParameter('operation', itemIndex) === 'getContent') {
+				if (resource === 'calendar') {
+					const window = monthWindow(
+						new Date(),
+						this.getNodeParameter('monthsAhead', itemIndex) as number,
+					);
+					const onlyUpcoming = this.getNodeParameter('onlyUpcoming', itemIndex) as boolean;
+					const today = todayInPoland();
+					const wanted = (entry: { date: string }) => !onlyUpcoming || entry.date >= today;
+					const scan = await client.getCalendar({ months: window.months }, (entries) =>
+						entries.filter(wanted).map((entry) => entry.key),
+					);
+					for (const entry of scan.entries.filter(wanted)) {
+						const detail = scan.details.get(entry.key) ?? null;
+						output.push({
+							json: {
+								changeType: 'existing',
+								eventKey: entry.key,
+								eventId: entry.eventId,
+								route: entry.route,
+								...entrySnapshot(entry, detail),
+								changedFields: [],
+								previous: null,
+								details: detail?.fields ?? null,
+							},
+							pairedItem: { item: itemIndex },
+						});
+					}
+					continue;
+				}
+				if (operation === 'getContent') {
 					const result = await client.getMessageContent(
 						this.getNodeParameter('messageId', itemIndex) as string,
 					);

@@ -225,3 +225,96 @@ for (const [name, body] of Object.entries({
 		assert.match(result.message, /PROTOCOL_ERROR/);
 	});
 }
+
+test('Calendar Get Events scans the month window and returns upcoming entries with details', async (t) => {
+	const { LibrusClient } = require('../dist/nodes/Librus/LibrusClient');
+	const today = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Warsaw' }).format(new Date());
+	const entry = (key, date) => ({
+		key,
+		route: 'szczegoly',
+		eventId: key.split('/')[1],
+		date,
+		subject: 'Edukacja matematyczna',
+		teacher: null,
+		description: null,
+		lessonNumber: 3,
+		hour: null,
+		text: 'Sprawdzian',
+	});
+	const entries = [
+		entry('szczegoly/1', '2000-01-01'),
+		entry('szczegoly/2', today),
+		entry('szczegoly/3', '2099-12-31'),
+	];
+	let months, selected;
+	t.mock.method(LibrusClient.prototype, 'getCalendar', async (options, select) => {
+		months = options.months;
+		selected = select(entries);
+		return {
+			entries,
+			details: new Map([
+				[
+					'szczegoly/2',
+					{
+						fields: { Rodzaj: 'Sprawdzian' },
+						rodzaj: 'Sprawdzian',
+						room: '43',
+						addedAt: null,
+						teacher: 'Synthetic Teacher',
+						subject: null,
+						description: 'Dodawanie do 20',
+						lessonNumber: null,
+						date: null,
+					},
+				],
+			]),
+		};
+	});
+	const ctx = context(false);
+	ctx.getInputData = () => [{ json: {} }];
+	ctx.getNodeParameter = (name) =>
+		({ resource: 'calendar', operation: 'getEvents', monthsAhead: 2, onlyUpcoming: true })[name];
+	const [items] = await new Librus().execute.call(ctx);
+	assert.equal(months.length, 3);
+	assert.deepEqual(selected, ['szczegoly/2', 'szczegoly/3']);
+	assert.deepEqual(
+		items.map((item) => item.json.eventId),
+		['2', '3'],
+	);
+	assert.equal(items[0].json.changeType, 'existing');
+	assert.equal(items[0].json.rodzaj, 'Sprawdzian');
+	assert.equal(items[0].json.teacher, 'Synthetic Teacher');
+	assert.equal(items[0].json.description, 'Dodawanie do 20');
+	assert.deepEqual(items[0].json.details, { Rodzaj: 'Sprawdzian' });
+	assert.equal(items[1].json.details, null);
+	assert.deepEqual(items[0].pairedItem, { item: 0 });
+});
+test('Calendar Get Events can include past entries of the window', async (t) => {
+	const { LibrusClient } = require('../dist/nodes/Librus/LibrusClient');
+	const entries = [
+		{
+			key: 'hash/x',
+			route: null,
+			eventId: null,
+			date: '2000-01-01',
+			subject: null,
+			teacher: null,
+			description: null,
+			lessonNumber: null,
+			hour: null,
+			text: 'Stary wpis',
+		},
+	];
+	t.mock.method(LibrusClient.prototype, 'getCalendar', async (options, select) => {
+		assert.equal(options.months.length, 1);
+		assert.deepEqual(select(entries), ['hash/x']);
+		return { entries, details: new Map() };
+	});
+	const ctx = context(false);
+	ctx.getInputData = () => [{ json: {} }];
+	ctx.getNodeParameter = (name) =>
+		({ resource: 'calendar', operation: 'getEvents', monthsAhead: 0, onlyUpcoming: false })[name];
+	const [items] = await new Librus().execute.call(ctx);
+	assert.equal(items.length, 1);
+	assert.equal(items[0].json.eventKey, 'hash/x');
+});

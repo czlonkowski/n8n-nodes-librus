@@ -95,6 +95,15 @@ Każdy element zawiera m.in. `changeType`, `eventKey`, `eventId`, `route`, `date
 
 Wykrywanie zmian opiera się wyłącznie na tym, co pokazuje siatka terminarza — na dacie, tekście komórki, nauczycielu i opisie. Edycja widoczna tylko na stronie szczegółów wydarzenia (np. sama zmiana sali) nie wywoła zdarzenia zmiany, dopóki nie zajdzie razem z inną, widoczną w siatce edycją. Usunięcie wydarzenia nigdy nie niesie pola `details` (jest `null`) — to, co zniknęło, opisuje pole `previous`.
 
+## Pobieranie wydarzeń z terminarza
+
+Wybierz **Terminarz → Pobierz wydarzenia**, żeby jednorazowo odczytać wpisy z terminarza, np. do zasilenia kalendarza istniejącymi wydarzeniami.
+
+- **Liczba kolejnych miesięcy** (0–6, domyślnie 2) — ile miesięcy po bieżącym sprawdzić.
+- **Tylko nadchodzące** (domyślnie włączone) — pomija wpisy z datą wcześniejszą niż dzisiejsza według czasu polskiego.
+
+Każdy element ma te same pola co zdarzenia triggera terminarza, z `changeType: "existing"`, `changedFields: []` i `previous: null`. Szczegóły wpisu (rodzaj, sala, nauczyciel, opis ze strony wydarzenia) są pobierane dla maksymalnie 50 wpisów w jednym wykonaniu; pozostałe mają tylko dane z siatki i `details: null`.
+
 ## Ograniczenia i rozwiązywanie problemów
 
 - **Oznaczanie jako nieprzeczytane lub przeczytane**, wysyłanie, usuwanie i pobieranie załączników nie są obsługiwane. Odczyt pełnej treści może sam zmienić status wiadomości w Librusie.

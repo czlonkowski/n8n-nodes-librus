@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.5.0 — 2026-09-24
+
+- Add a Terminarz resource with the Pobierz wydarzenia operation to the Librus node. It reads the current month plus 0–6 following months and returns the entries in the same shape as the calendar trigger, marked `changeType: "existing"`, optionally only those dated today or later in Polish time. It reuses the shared session and hydrates details for up to 50 entries per run.
+
 ## 0.4.0 — 2026-09-24
 
 - Add an optional Proxy field to the Librus credential. All Librus traffic, the connection test included, goes through the given HTTP or HTTPS proxy using n8n's own request helper, which tunnels HTTPS with CONNECT. This helps when Librus does not accept connections from the n8n server's address.
