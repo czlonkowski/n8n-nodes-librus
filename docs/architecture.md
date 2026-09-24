@@ -106,3 +106,7 @@ The client reports the session lifecycle through the optional `log` callback, wh
 
 `TRANSPORT_ERROR` now carries a safe cause and the host, e.g. `[Przyczyna: ETIMEDOUT; host: synergia.librus.pl]`. Only system-style error codes (`^[A-Z][A-Z0-9_]{1,40}$`) are copied; the underlying message never is.
 
+
+## Proxy (0.4.0)
+
+The credential's optional `proxyUrl` is parsed by `proxy.ts` into the `{ protocol, host, port, auth }` shape of n8n's `IHttpRequestOptions.proxy`. `createTransport` passes it to `helpers.httpRequest`, where n8n's outbound HTTP layer builds an `HttpsProxyAgent` that tunnels HTTPS with CONNECT (axios's own proxy option is disabled there). The credential test's legacy `helpers.request` receives the same proxy as a URL string. Only `http:` and `https:` proxies without a path, query or fragment are accepted: n8n ignores a proxy URL with any other scheme with only a server-log warning and connects directly, which would silently defeat the purpose. Invalid input raises `PROXY_INVALID` before any request, and the value is never echoed. The proxy URL is part of the session-cache key, so sessions made through different routes never mix, and transport errors through a proxy carry `przez proxy` instead of the proxy address. Whether a given n8n version honours the `proxy` option has to be confirmed live on that deployment: the offline tests only prove that the option is handed to n8n.

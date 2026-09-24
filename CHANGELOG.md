@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.0 — 2026-09-24
+
+- Add an optional Proxy field to the Librus credential. All Librus traffic, the connection test included, goes through the given HTTP or HTTPS proxy using n8n's own request helper, which tunnels HTTPS with CONNECT. This helps when Librus does not accept connections from the n8n server's address.
+- Reject an unsupported or malformed proxy address with PROXY_INVALID before any request, because n8n silently falls back to a direct connection for a proxy address it does not support. The error never echoes the address, which may hold a password.
+- Keep sessions made through different proxies apart, and mark transport errors through a proxy with "przez proxy" without revealing the proxy.
+
 ## 0.3.0 — 2026-09-24
 
 - Reuse one logged-in Librus session across polls, triggers and Get Content items on the same account instead of logging in from scratch on every operation, which made three triggers perform at least 72 logins a day. Sessions live in process memory only, keyed by a hash of login and password, and are never written to workflow static data, credentials or output.

@@ -9,6 +9,7 @@ import { LibrusClient, LibrusError, safeError } from './LibrusClient';
 import { Librus } from './Librus.node';
 import { createTransport } from './transport';
 import { sharedSessions } from './sessionCache';
+import { parseProxy, proxyUrl } from './proxy';
 import { accountKey, selectNewMessages } from './pollState';
 import {
 	commitCalendarPoll,
@@ -209,13 +210,18 @@ export class LibrusTrigger implements INodeType {
 			const credentials = await this.getCredentials('librusSessionApi');
 			if (typeof credentials.username !== 'string' || typeof credentials.password !== 'string')
 				throw new LibrusError('INVALID_OPTIONS');
+			const proxy = parseProxy(credentials.proxyUrl);
 			const client = new LibrusClient(
-				createTransport(this.helpers.httpRequest.bind(this.helpers)),
+				createTransport(this.helpers.httpRequest.bind(this.helpers), proxy),
 				{
 					username: credentials.username,
 					password: credentials.password,
 				},
-				{ sessions: sharedSessions, log: (message) => this.logger?.info(message) },
+				{
+					sessions: sharedSessions,
+					log: (message) => this.logger?.info(message),
+					proxy: proxy && proxyUrl(proxy),
+				},
 			);
 			const manual = this.getMode() === 'manual';
 			const account = accountKey(

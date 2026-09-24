@@ -24,8 +24,15 @@ export class SessionCache {
 
 	constructor(readonly now: () => number = Date.now) {}
 
-	key(username: string, password: string): string {
-		return createHash('sha256').update(username).update('\0').update(password).digest('hex');
+	/** `route` separates sessions made through different proxies (or none). */
+	key(username: string, password: string, route = ''): string {
+		return createHash('sha256')
+			.update(username)
+			.update('\0')
+			.update(password)
+			.update('\0')
+			.update(route)
+			.digest('hex');
 	}
 
 	lookup(key: string): SessionLookup {

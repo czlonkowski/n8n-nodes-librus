@@ -1,5 +1,6 @@
 import type { IHttpRequestOptions } from 'n8n-workflow';
 import type { Transport, Response } from './LibrusClient';
+import { proxyUrl, type ProxyConfig } from './proxy';
 
 // The legacy helper represents an empty HTTP body as undefined, including redirects.
 // Keep only response fields; its extra request metadata may contain credentials.
@@ -14,10 +15,12 @@ function normalizeResponse(value: unknown): Response {
 
 export function createTransport(
 	httpRequest: (options: IHttpRequestOptions) => Promise<unknown>,
+	proxy?: ProxyConfig,
 ): Transport {
 	return async (request) => {
 		const response = await httpRequest({
 			...request,
+			...(proxy ? { proxy } : {}),
 			disableFollowRedirect: true,
 			returnFullResponse: true,
 			ignoreHttpStatusErrors: true,
@@ -31,6 +34,7 @@ export function createTransport(
 // n8n's custom credential-test context exposes only the legacy request helper.
 export function createCredentialTestTransport(
 	requestHelper: (options: object) => Promise<unknown>,
+	proxy?: ProxyConfig,
 ): Transport {
 	return async (request) =>
 		normalizeResponse(
@@ -46,6 +50,7 @@ export function createCredentialTestTransport(
 				simple: false,
 				json: false,
 				encoding: 'utf8',
+				...(proxy ? { proxy: proxyUrl(proxy) } : {}),
 			}),
 		);
 }

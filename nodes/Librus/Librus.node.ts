@@ -17,6 +17,7 @@ import {
 } from './LibrusClient';
 import { createTransport, createCredentialTestTransport } from './transport';
 import { sharedSessions } from './sessionCache';
+import { parseProxy, proxyUrl } from './proxy';
 
 export class Librus implements INodeType {
 	description: INodeTypeDescription = {
@@ -184,9 +185,11 @@ export class Librus implements INodeType {
 					const data = credential.data;
 					if (typeof data?.username !== 'string' || typeof data?.password !== 'string')
 						throw new LibrusError('INVALID_OPTIONS');
+					const proxy = parseProxy(data.proxyUrl);
 					const client = new LibrusClient(
-						createCredentialTestTransport(this.helpers.request.bind(this.helpers)),
+						createCredentialTestTransport(this.helpers.request.bind(this.helpers), proxy),
 						{ username: data.username, password: data.password },
+						{ proxy: proxy && proxyUrl(proxy) },
 					);
 					await client.getMessages({
 						returnAll: false,
@@ -220,10 +223,15 @@ export class Librus implements INodeType {
 				const credentials = await this.getCredentials('librusSessionApi', itemIndex);
 				if (typeof credentials.username !== 'string' || typeof credentials.password !== 'string')
 					throw new LibrusError('INVALID_OPTIONS');
+				const proxy = parseProxy(credentials.proxyUrl);
 				const client = new LibrusClient(
-					createTransport(this.helpers.httpRequest.bind(this.helpers)),
+					createTransport(this.helpers.httpRequest.bind(this.helpers), proxy),
 					{ username: credentials.username, password: credentials.password },
-					{ sessions: sharedSessions, log: (message) => this.logger?.info(message) },
+					{
+						sessions: sharedSessions,
+						log: (message) => this.logger?.info(message),
+						proxy: proxy && proxyUrl(proxy),
+					},
 				);
 				if (this.getNodeParameter('operation', itemIndex) === 'getContent') {
 					const result = await client.getMessageContent(

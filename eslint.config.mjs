@@ -38,7 +38,7 @@ export default [
 		},
 	},
 	{
-		files: ['nodes/Librus/LibrusClient.ts', 'nodes/Librus/pollState.ts'],
+		files: ['nodes/Librus/LibrusClient.ts', 'nodes/Librus/pollState.ts', 'nodes/Librus/proxy.ts'],
 		rules: {
 			// Framework-independent client: only safe errors cross into the node adapter.
 			'@n8n/community-nodes/require-node-api-error': 'off',

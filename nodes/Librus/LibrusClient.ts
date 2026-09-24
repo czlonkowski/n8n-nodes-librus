@@ -33,6 +33,11 @@ export interface ClientOptions {
 	sessions?: SessionCache;
 	/** Receives session lifecycle notes. They never contain credentials, cookies or content. */
 	log?: (message: string) => void;
+	/**
+	 * The proxy the transport routes through, as a URL. Only hashed into the session key and
+	 * flagged in transport errors; never shown.
+	 */
+	proxy?: string;
 }
 type Budget = 'SCAN_INCOMPLETE' | 'CALENDAR_SCAN_INCOMPLETE';
 export type ContentSource = 'preview' | 'full';
@@ -297,7 +302,7 @@ export class LibrusClient {
 	}
 
 	private key(sessions: SessionCache): string {
-		this.cacheKey ??= sessions.key(this.login.username, this.login.password);
+		this.cacheKey ??= sessions.key(this.login.username, this.login.password, this.options.proxy);
 		return this.cacheKey;
 	}
 
@@ -392,7 +397,7 @@ export class LibrusClient {
 				});
 			} catch (cause) {
 				const error = new LibrusError('TRANSPORT_ERROR');
-				error.message += ` [Przyczyna: ${transportCause(cause)}; host: ${url.hostname}]`;
+				error.message += ` [Przyczyna: ${transportCause(cause)}; host: ${url.hostname}${this.options.proxy ? '; przez proxy' : ''}]`;
 				throw error;
 			}
 			if (typeof response.body !== 'string')

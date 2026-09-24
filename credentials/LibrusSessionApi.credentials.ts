@@ -24,5 +24,15 @@ export class LibrusSessionApi implements ICredentialType {
 			default: '',
 			required: true,
 		},
+		{
+			displayName: 'Proxy',
+			name: 'proxyUrl',
+			type: 'string',
+			typeOptions: { password: true },
+			default: '',
+			placeholder: 'http://użytkownik:hasło@proxy.example.pl:3128',
+			description:
+				'Opcjonalny serwer proxy HTTP lub HTTPS, przez który idzie cały ruch do Librusa, np. gdy Librus nie przyjmuje połączeń z adresu serwera n8n. Zostaw puste, aby łączyć się bezpośrednio.',
+		},
 	];
 }

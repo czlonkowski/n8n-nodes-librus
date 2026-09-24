@@ -29,6 +29,16 @@ Zapisz dane i sprawdź połączenie. Jeśli pojawi się `ACTION_REQUIRED`, zalog
 
 Dane logowania są przechowywane jako credentials w n8n. Węzeł nie zwraca hasła ani ciasteczek sesji w wynikach.
 
+### Proxy
+
+Librus może nie przyjmować połączeń z adresów centrów danych. Wtedy każde zapytanie kończy się błędem `TRANSPORT_ERROR` z przyczyną w rodzaju `ETIMEDOUT`, choć z domowego komputera Librus działa. W takim przypadku wpisz w danych uwierzytelniających pole **Proxy**, np. `http://użytkownik:hasło@proxy.example.pl:3128`. Cały ruch do Librusa, również test połączenia, pójdzie wtedy przez to proxy.
+
+- Obsługiwane są proxy HTTP i HTTPS (`http://` lub `https://`) z tunelowaniem CONNECT. Proxy SOCKS nie jest obsługiwane.
+- Nieprawidłowy adres zatrzymuje węzeł błędem `PROXY_INVALID`, zanim wyśle jakiekolwiek zapytanie. Węzeł nie połączy się wtedy po cichu bezpośrednio.
+- Znaki specjalne w użytkowniku i haśle zakoduj procentowo (np. `@` jako `%40`).
+- Błąd połączenia przez proxy ma dopisek `przez proxy`. Adres proxy nie pojawia się w komunikatach ani logach węzła.
+- Po zmianie proxy węzeł loguje się ponownie.
+
 ## Pobieranie wiadomości
 
 W węźle **Librus** wybierz **Wiadomość → Pobierz wiadomości**.

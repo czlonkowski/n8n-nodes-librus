@@ -2,6 +2,8 @@ const messages: Record<string, string> = {
 	UNSAFE_URL: 'Librus wskazał niedozwolony adres. Nie wysłano do niego zapytania.',
 	TRANSPORT_ERROR:
 		'Nie udało się połączyć z Librusem. Sprawdź połączenie i spróbuj ponownie później.',
+	PROXY_INVALID:
+		'Nieprawidłowy adres proxy w danych logowania. Podaj adres w postaci http://host:port lub https://host:port, opcjonalnie z użytkownikiem i hasłem, albo zostaw pole puste.',
 	PROTOCOL_ERROR:
 		'Librus zwrócił odpowiedź w nieoczekiwanym formacie. Integracja może wymagać aktualizacji.',
 	AUTH_FAILED: 'Librus odrzucił logowanie. Sprawdź login i hasło na stronie Librusa.',
