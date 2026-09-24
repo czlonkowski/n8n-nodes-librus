@@ -16,6 +16,7 @@ import {
 	type ReadStatus,
 } from './LibrusClient';
 import { createTransport, createCredentialTestTransport } from './transport';
+import { sharedSessions } from './sessionCache';
 
 export class Librus implements INodeType {
 	description: INodeTypeDescription = {
@@ -222,6 +223,7 @@ export class Librus implements INodeType {
 				const client = new LibrusClient(
 					createTransport(this.helpers.httpRequest.bind(this.helpers)),
 					{ username: credentials.username, password: credentials.password },
+					{ sessions: sharedSessions, log: (message) => this.logger?.info(message) },
 				);
 				if (this.getNodeParameter('operation', itemIndex) === 'getContent') {
 					const result = await client.getMessageContent(

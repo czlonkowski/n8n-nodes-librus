@@ -8,6 +8,7 @@ import {
 	safeError,
 } from './errors';
 import { parseEventDetail, parseMonth, type CalendarDetail, type CalendarEntry } from './terminarz';
+import type { SessionCache } from './sessionCache';
 export { LibrusError, safeError };
 
 export interface Request {
@@ -27,6 +28,13 @@ export interface Login {
 	username: string;
 	password: string;
 }
+export interface ClientOptions {
+	/** Reuse one logged-in session across clients. Without it every operation logs in. */
+	sessions?: SessionCache;
+	/** Receives session lifecycle notes. They never contain credentials, cookies or content. */
+	log?: (message: string) => void;
+}
+type Budget = 'SCAN_INCOMPLETE' | 'CALENDAR_SCAN_INCOMPLETE';
 export type ContentSource = 'preview' | 'full';
 export type ReadStatus = 'all' | 'unread' | 'read';
 export interface Scan {
@@ -151,6 +159,21 @@ function checkedRedirect(value: string, base: string): URL {
 		url.protocol = 'https:';
 	return checkedUrl(url.href);
 }
+/**
+ * A code-owned label for why a request never got an HTTP response, such as ETIMEDOUT or
+ * ECONNRESET. Only system-style error codes pass; messages are never copied.
+ */
+function transportCause(cause: unknown): string {
+	const nested = object(cause) ? cause.cause : undefined;
+	for (const candidate of [cause, nested]) {
+		const code = object(candidate) ? candidate.code : undefined;
+		if (typeof code === 'string' && /^[A-Z][A-Z0-9_]{1,40}$/.test(code)) return code;
+	}
+	return cause instanceof Error && /timeout/i.test(cause.message) ? 'TIMEOUT' : 'nieznana';
+}
+function minutes(ms: number): number {
+	return Math.max(0, Math.round(ms / 60000));
+}
 function authUrl(url: URL): boolean {
 	return url.hostname === 'api.librus.pl' && /^\/OAuth\/Authorization(?:\/|$)/.test(url.pathname);
 }
@@ -259,11 +282,84 @@ export class LibrusClient {
 	 * names the parameter the user can actually turn down, and the calendar events have
 	 * no "Maksymalna liczba stron".
 	 */
-	private budgetCode: 'SCAN_INCOMPLETE' | 'CALENDAR_SCAN_INCOMPLETE' = 'SCAN_INCOMPLETE';
+	private budgetCode: Budget = 'SCAN_INCOMPLETE';
+	/** When the session in `jar` was established, for the age reported in session notes. */
+	private sessionStart = 0;
+	private cacheKey?: string;
 	constructor(
 		private readonly transport: Transport,
 		private readonly login: Login,
+		private readonly options: ClientOptions = {},
 	) {}
+
+	private note(message: string): void {
+		this.options.log?.(`Librus: ${message}`);
+	}
+
+	private key(sessions: SessionCache): string {
+		this.cacheKey ??= sessions.key(this.login.username, this.login.password);
+		return this.cacheKey;
+	}
+
+	/** Adopts a stored session. Returns false when there is none to reuse. */
+	private restoreSession(): boolean {
+		const sessions = this.options.sessions;
+		if (!sessions) return false;
+		const stored = sessions.lookup(this.key(sessions));
+		if (stored.status === 'expired')
+			this.note(`zapisana sesja osiągnęła limit wieku (${minutes(stored.ageMs)} min)`);
+		if (stored.status !== 'ok') return false;
+		this.jar = stored.jar;
+		this.sessionStart = stored.establishedAt;
+		this.note(`używam zapisanej sesji (wiek: ${minutes(stored.ageMs)} min)`);
+		return true;
+	}
+
+	private forgetSession(): void {
+		const sessions = this.options.sessions;
+		if (sessions) sessions.forget(this.key(sessions));
+	}
+
+	/**
+	 * Runs one operation on a logged-in session: a stored one when available, otherwise a
+	 * fresh login. A session that stops working is logged in again once. Any failure drops
+	 * the stored session, so a broken one is never offered to the next operation.
+	 */
+	private async withSession<T>(budget: Budget, run: () => Promise<T>): Promise<T> {
+		const operation = async (): Promise<T> => {
+			// The budget starts once the account is free, so queueing never eats into it.
+			this.budgetCode = budget;
+			this.deadline = Date.now() + 120000;
+			this.requests = 0;
+			let reused = this.restoreSession();
+			if (!reused) await this.authenticate('brak zapisanej sesji');
+			for (let attempt = 0; ; attempt++) {
+				try {
+					return await run();
+				} catch (error) {
+					this.forgetSession();
+					const code = error instanceof LibrusError ? error.code : undefined;
+					// An expired session does not always announce itself as one: Librus may answer
+					// with a page instead of JSON or a bare 403. On a reused session those mean stale.
+					const stale =
+						code === 'SESSION_EXPIRED' ||
+						(reused && (code === 'PROTOCOL_ERROR' || code === 'ACCESS_DENIED'));
+					if (!stale || attempt === 1) throw error;
+					const reason = reused
+						? `zapisana sesja przestała działać po ${minutes(Date.now() - this.sessionStart)} min (${code})`
+						: 'sesja wygasła w trakcie zapytania';
+					reused = false;
+					// A full window costs roughly 8 (login) + 7 (months) + 50 (details) requests,
+					// so a late expiry would leave the retry unable to finish on a shared counter.
+					// Each attempt gets its own request budget; the deadline still bounds the whole.
+					this.requests = 0;
+					await this.authenticate(reason);
+				}
+			}
+		};
+		const sessions = this.options.sessions;
+		return sessions ? sessions.exclusive(this.key(sessions), operation) : operation();
+	}
 
 	private async request(value: string, body?: string): Promise<Response & { url: URL }> {
 		let url = checkedUrl(value);
@@ -294,8 +390,10 @@ export class LibrusClient {
 					body,
 					timeout: Math.max(1, Math.min(15000, remaining)),
 				});
-			} catch {
-				throw new LibrusError('TRANSPORT_ERROR');
+			} catch (cause) {
+				const error = new LibrusError('TRANSPORT_ERROR');
+				error.message += ` [Przyczyna: ${transportCause(cause)}; host: ${url.hostname}]`;
+				throw error;
 			}
 			if (typeof response.body !== 'string')
 				throw protocolError('typ treści odpowiedzi HTTP', response.body);
@@ -356,7 +454,8 @@ export class LibrusClient {
 		throw protocolError('limit przekierowań');
 	}
 
-	private async authenticate(): Promise<void> {
+	private async authenticate(reason: string): Promise<void> {
+		this.note(`nowe logowanie (${reason})`);
 		try {
 			this.jar = new CookieJar();
 			const entry = await this.request('https://synergia.librus.pl/loguj/portalRodzina');
@@ -386,7 +485,10 @@ export class LibrusClient {
 			const inbox = await this.request('https://synergia.librus.pl/wiadomosci3');
 			if (authUrl(inbox.url) || /\/loguj(?:\/|$)/.test(inbox.url.pathname))
 				throw actionRequired('otwarcie skrzynki', inbox.url);
+			const sessions = this.options.sessions;
+			this.sessionStart = sessions ? sessions.store(this.key(sessions), this.jar) : Date.now();
 		} catch (error) {
+			this.forgetSession();
 			if (error instanceof LibrusError && error.code === 'PROTOCOL_ERROR')
 				error.message += ' [Faza: logowanie]';
 			throw error;
@@ -410,31 +512,20 @@ export class LibrusClient {
 				options.contentSource !== 'full')
 		)
 			throw new LibrusError('INVALID_OPTIONS');
-		this.budgetCode = 'SCAN_INCOMPLETE';
-		this.deadline = Date.now() + 120000;
-		this.requests = 0;
-		await this.authenticate();
 		let unreadSelection: Message[] | undefined;
-		for (let attempt = 0; attempt < 2; attempt++) {
-			try {
-				// Detail reads can change the unread filter. Keep its completed selection on session recovery.
-				const result = unreadSelection ?? (await this.scan(options));
-				if (options.includeContent && options.contentSource === 'full') {
-					if (result.length > 50) throw new LibrusError('FULL_CONTENT_LIMIT');
-					if (options.readStatus === 'unread') unreadSelection = result;
-					for (const message of result) {
-						message.content = await this.fullContent(message.messageId);
-						message.contentSource = 'full';
-					}
+		return await this.withSession('SCAN_INCOMPLETE', async () => {
+			// Detail reads can change the unread filter. Keep its completed selection on session recovery.
+			const result = unreadSelection ?? (await this.scan(options));
+			if (options.includeContent && options.contentSource === 'full') {
+				if (result.length > 50) throw new LibrusError('FULL_CONTENT_LIMIT');
+				if (options.readStatus === 'unread') unreadSelection = result;
+				for (const message of result) {
+					message.content = await this.fullContent(message.messageId);
+					message.contentSource = 'full';
 				}
-				return result;
-			} catch (error) {
-				if (!(error instanceof LibrusError) || error.code !== 'SESSION_EXPIRED' || attempt === 1)
-					throw error;
-				await this.authenticate();
 			}
-		}
-		throw new LibrusError('SESSION_EXPIRED');
+			return result;
+		});
 	}
 
 	async getMessageContent(
@@ -447,20 +538,11 @@ export class LibrusClient {
 			!/^[A-Za-z0-9_-]+$/.test(messageId)
 		)
 			throw new LibrusError('INVALID_OPTIONS');
-		this.budgetCode = 'SCAN_INCOMPLETE';
-		this.deadline = Date.now() + 120000;
-		this.requests = 0;
-		await this.authenticate();
-		for (let attempt = 0; attempt < 2; attempt++) {
-			try {
-				return { messageId, content: await this.fullContent(messageId), contentSource: 'full' };
-			} catch (error) {
-				if (!(error instanceof LibrusError) || error.code !== 'SESSION_EXPIRED' || attempt === 1)
-					throw error;
-				await this.authenticate();
-			}
-		}
-		throw new LibrusError('SESSION_EXPIRED');
+		return await this.withSession('SCAN_INCOMPLETE', async () => ({
+			messageId,
+			content: await this.fullContent(messageId),
+			contentSource: 'full' as const,
+		}));
 	}
 
 	private async fullContent(messageId: string): Promise<string> {
@@ -598,55 +680,39 @@ export class LibrusClient {
 			options.months.some((month) => !/^\d{4}-(?:0[1-9]|1[0-2])$/.test(month))
 		)
 			throw new LibrusError('CALENDAR_INVALID_OPTIONS');
-		this.budgetCode = 'CALENDAR_SCAN_INCOMPLETE';
-		this.deadline = Date.now() + 120000;
-		this.requests = 0;
-		await this.authenticate();
-		for (let attempt = 0; attempt < 2; attempt++) {
-			try {
-				const entries: CalendarEntry[] = [];
-				for (const month of options.months) {
-					const [year, index] = month.split('-').map(Number);
-					if (year < 2000 || year > 2100) throw new LibrusError('CALENDAR_INVALID_OPTIONS');
-					entries.push(...(await this.monthPage(year, index)));
-				}
-				const known = new Map(entries.map((entry) => [entry.key, entry]));
-				const selected = select(entries);
-				if (!Array.isArray(selected)) throw new LibrusError('CALENDAR_INVALID_OPTIONS');
-				const details = new Map<string, CalendarDetail | null>();
-				// A link-less (synthetic-key) entry has nothing to fetch, so it is resolved
-				// as null here and never consumes one of the MAX_DETAILS slots — a real
-				// backlog of fetchable entries drains that much faster.
-				const fetchable: { key: string; route: 'szczegoly' | 'szczegoly_wolne'; id: string }[] = [];
-				for (const key of selected) {
-					const entry = known.get(key);
-					if (!entry) continue;
-					if (!entry.route || !entry.eventId) {
-						details.set(key, null);
-						continue;
-					}
-					fetchable.push({ key, route: entry.route, id: entry.eventId });
-				}
-				// Bounded independently of the caller, by the detail cap and by what is left
-				// of the request budget. Keys left out stay unresolved, which the state
-				// module treats as "retry on the next poll".
-				for (const { key, route, id } of fetchable.slice(0, MAX_DETAILS)) {
-					if (MAX_REQUESTS - this.requests < DETAIL_HEADROOM) break;
-					const detail = await this.eventDetail(route, id);
-					if (detail !== null) details.set(key, detail);
-				}
-				return { entries, details };
-			} catch (error) {
-				if (!(error instanceof LibrusError) || error.code !== 'SESSION_EXPIRED' || attempt === 1)
-					throw error;
-				// A full window costs roughly 8 (login) + 7 (months) + 50 (details) requests,
-				// so a session expiry late in hydration would leave the retry unable to
-				// finish on a shared counter. Each attempt gets its own request budget; the
-				// 120-second deadline, untouched, still bounds the operation as a whole.
-				this.requests = 0;
-				await this.authenticate();
+		return await this.withSession('CALENDAR_SCAN_INCOMPLETE', async () => {
+			const entries: CalendarEntry[] = [];
+			for (const month of options.months) {
+				const [year, index] = month.split('-').map(Number);
+				if (year < 2000 || year > 2100) throw new LibrusError('CALENDAR_INVALID_OPTIONS');
+				entries.push(...(await this.monthPage(year, index)));
 			}
-		}
-		throw new LibrusError('SESSION_EXPIRED');
+			const known = new Map(entries.map((entry) => [entry.key, entry]));
+			const selected = select(entries);
+			if (!Array.isArray(selected)) throw new LibrusError('CALENDAR_INVALID_OPTIONS');
+			const details = new Map<string, CalendarDetail | null>();
+			// A link-less (synthetic-key) entry has nothing to fetch, so it is resolved
+			// as null here and never consumes one of the MAX_DETAILS slots — a real
+			// backlog of fetchable entries drains that much faster.
+			const fetchable: { key: string; route: 'szczegoly' | 'szczegoly_wolne'; id: string }[] = [];
+			for (const key of selected) {
+				const entry = known.get(key);
+				if (!entry) continue;
+				if (!entry.route || !entry.eventId) {
+					details.set(key, null);
+					continue;
+				}
+				fetchable.push({ key, route: entry.route, id: entry.eventId });
+			}
+			// Bounded independently of the caller, by the detail cap and by what is left
+			// of the request budget. Keys left out stay unresolved, which the state
+			// module treats as "retry on the next poll".
+			for (const { key, route, id } of fetchable.slice(0, MAX_DETAILS)) {
+				if (MAX_REQUESTS - this.requests < DETAIL_HEADROOM) break;
+				const detail = await this.eventDetail(route, id);
+				if (detail !== null) details.set(key, detail);
+			}
+			return { entries, details };
+		});
 	}
 }

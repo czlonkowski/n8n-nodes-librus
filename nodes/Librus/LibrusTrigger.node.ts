@@ -8,6 +8,7 @@ import type {
 import { LibrusClient, LibrusError, safeError } from './LibrusClient';
 import { Librus } from './Librus.node';
 import { createTransport } from './transport';
+import { sharedSessions } from './sessionCache';
 import { accountKey, selectNewMessages } from './pollState';
 import {
 	commitCalendarPoll,
@@ -214,6 +215,7 @@ export class LibrusTrigger implements INodeType {
 					username: credentials.username,
 					password: credentials.password,
 				},
+				{ sessions: sharedSessions, log: (message) => this.logger?.info(message) },
 			);
 			const manual = this.getMode() === 'manual';
 			const account = accountKey(

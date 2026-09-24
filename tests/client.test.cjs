@@ -1058,3 +1058,145 @@ test('an expired session during hydration restarts scan and selection once', asy
 	assert.equal(selections, 2);
 	assert.equal(result.details.get('szczegoly/11').rodzaj, 'Sprawdzian');
 });
+
+const { SessionCache, MAX_SESSION_AGE_MS } = require('../dist/nodes/Librus/sessionCache');
+function shared(queue, sessions, notes = [], credentials = login) {
+	const calls = [];
+	const client = new LibrusClient(
+		async (request) => {
+			calls.push(request);
+			assert.ok(queue.length, 'Unexpected additional request');
+			const reply = queue.shift();
+			if (reply instanceof Error) throw reply;
+			return reply;
+		},
+		credentials,
+		{ sessions, log: (note) => notes.push(note) },
+	);
+	return { client, calls };
+}
+const inbox = (id = 1) => ok({ data: [message(id)] });
+const logins = (calls) => calls.filter((call) => call.method === 'POST').length;
+test('a stored session is reused by the next client without logging in again', async () => {
+	const sessions = new SessionCache();
+	const notes = [];
+	const first = shared([...auth(), inbox()], sessions, notes);
+	await first.client.getMessages(options);
+	const queue = [inbox(2)];
+	const second = shared(queue, sessions, notes);
+	const result = await second.client.getMessages(options);
+	assert.equal(result[0].messageId, '2');
+	assert.equal(second.calls.length, 1);
+	assert.equal(second.calls[0].headers.Cookie, 'inbox=synthetic-inbox');
+	assert.match(notes.join('\n'), /nowe logowanie \(brak zapisanej sesji\)/);
+	assert.match(notes.join('\n'), /używam zapisanej sesji \(wiek: 0 min\)/);
+	assert.doesNotMatch(notes.join('\n'), /synthetic-(login|password|inbox|session)/);
+});
+test('an expired stored session logs in again once and reports its age', async () => {
+	const sessions = new SessionCache();
+	const notes = [];
+	await shared([...auth(), inbox()], sessions).client.getMessages(options);
+	const queue = [
+		redirect('https://synergia.librus.pl/loguj'),
+		ok('<html></html>'),
+		...auth(),
+		inbox(3),
+	];
+	const second = shared(queue, sessions, notes);
+	const result = await second.client.getMessages(options);
+	assert.equal(result[0].messageId, '3');
+	assert.equal(queue.length, 0);
+	assert.equal(logins(second.calls), 1);
+	assert.match(notes.join('\n'), /przestała działać po 0 min \(SESSION_EXPIRED\)/);
+	// The replacement session is stored for the next client.
+	const third = shared([inbox(4)], sessions);
+	assert.equal((await third.client.getMessages(options))[0].messageId, '4');
+});
+test('a reused session answering with a page instead of JSON is treated as stale', async () => {
+	const sessions = new SessionCache();
+	await shared([...auth(), inbox()], sessions).client.getMessages(options);
+	const queue = [ok('<!doctype html><html></html>'), ...auth(), inbox(5)];
+	const second = shared(queue, sessions);
+	assert.equal((await second.client.getMessages(options))[0].messageId, '5');
+	assert.equal(queue.length, 0);
+});
+test('the same answer on a fresh login is still a protocol error, not a retry', async () => {
+	const sessions = new SessionCache();
+	const { client } = shared([...auth(), ok('<!doctype html><html></html>')], sessions);
+	await assert.rejects(client.getMessages(options), { code: 'PROTOCOL_ERROR' });
+});
+test('a session past the age limit is replaced by a fresh login', async () => {
+	let now = 1_000_000;
+	const sessions = new SessionCache(() => now);
+	const notes = [];
+	await shared([...auth(), inbox()], sessions).client.getMessages(options);
+	now += MAX_SESSION_AGE_MS;
+	const second = shared([...auth(), inbox(6)], sessions, notes);
+	assert.equal((await second.client.getMessages(options))[0].messageId, '6');
+	assert.equal(logins(second.calls), 1);
+	assert.match(notes.join('\n'), /limit wieku \(360 min\)/);
+});
+test('another password never reuses the stored session', async () => {
+	const sessions = new SessionCache();
+	await shared([...auth(), inbox()], sessions).client.getMessages(options);
+	const other = shared([...auth(), inbox(7)], sessions, [], {
+		username: login.username,
+		password: 'other-password',
+	});
+	await other.client.getMessages(options);
+	assert.equal(logins(other.calls), 1);
+});
+test('any failure drops the stored session so the next client logs in', async () => {
+	const sessions = new SessionCache();
+	await shared([...auth(), inbox()], sessions).client.getMessages(options);
+	const failing = shared([new Error('socket closed')], sessions);
+	await assert.rejects(failing.client.getMessages(options), { code: 'TRANSPORT_ERROR' });
+	const next = shared([...auth(), inbox(8)], sessions);
+	await next.client.getMessages(options);
+	assert.equal(logins(next.calls), 1);
+});
+test('concurrent operations on one account log in once, one after another', async () => {
+	const sessions = new SessionCache();
+	const queue = [...auth(), inbox(1), inbox(2)];
+	const first = shared(queue, sessions);
+	const second = shared(queue, sessions);
+	const [a, b] = await Promise.all([
+		first.client.getMessages(options),
+		second.client.getMessages(options),
+	]);
+	assert.deepEqual([a[0].messageId, b[0].messageId], ['1', '2']);
+	assert.equal(logins(first.calls) + logins(second.calls), 1);
+	assert.equal(second.calls.length, 1);
+	assert.equal(queue.length, 0);
+});
+test('calendar and content operations reuse the stored session too', async () => {
+	const sessions = new SessionCache();
+	await shared([...auth(), inbox()], sessions).client.getMessages(options);
+	const content = shared(
+		[ok({ data: { messageId: '9', Message: Buffer.from('treść').toString('base64') } })],
+		sessions,
+	);
+	assert.equal((await content.client.getMessageContent('9')).content, 'treść');
+	assert.equal(content.calls.length, 1);
+});
+test('transport errors name a safe cause and the host, never the raw message', async () => {
+	const timeout = Object.assign(
+		new Error('connect ETIMEDOUT 46.248.183.42:443 synthetic-password'),
+		{
+			code: 'ETIMEDOUT',
+		},
+	);
+	const { client } = setup([timeout]);
+	await assert.rejects(client.getMessages(options), (error) => {
+		assert.equal(error.code, 'TRANSPORT_ERROR');
+		assert.match(error.message, /\[Przyczyna: ETIMEDOUT; host: synergia\.librus\.pl\]$/);
+		assert.doesNotMatch(error.message, /46\.248|synthetic-password/);
+		return true;
+	});
+	const odd = Object.assign(new Error('x'), { code: 'synthetic-password value' });
+	await assert.rejects(setup([odd]).client.getMessages(options), (error) => {
+		assert.match(error.message, /Przyczyna: nieznana/);
+		assert.doesNotMatch(error.message, /synthetic-password/);
+		return true;
+	});
+});

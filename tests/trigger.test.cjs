@@ -280,13 +280,14 @@ test('automatic polling baselines a tagged 19th message and emits a new tagged m
 	assert.equal(pending.length, 0);
 	assert.equal(state.librus.seenIds.length, 19);
 	inbox = [raw('new', [{ id: '0021', extra: 'PRIVATE-EXTRA' }]), ...inbox];
-	pending = replies();
+	// Later polls reuse the session the first one logged in with: only the inbox is read.
+	pending = [ok({ data: inbox })];
 	const result = await trigger.poll.call(ctx);
 	assert.equal(result[0].length, 1);
 	assert.equal(result[0][0].json.messageId, 'new');
 	assert.deepEqual(result[0][0].json.tags, ['0021']);
 	assert.doesNotMatch(JSON.stringify(result), /PRIVATE-EXTRA/);
-	pending = replies();
+	pending = [ok({ data: inbox })];
 	assert.equal(await trigger.poll.call(ctx), null);
 	assert.equal(pending.length, 0);
 });

@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.0 — 2026-09-24
+
+- Reuse one logged-in Librus session across polls, triggers and Get Content items on the same account instead of logging in from scratch on every operation, which made three triggers perform at least 72 logins a day. Sessions live in process memory only, keyed by a hash of login and password, and are never written to workflow static data, credentials or output.
+- Run operations on one account one at a time, so triggers never log in concurrently or replace each other's cookies mid-request.
+- Detect a stored session that Librus has ended on first use and log in again once; on a reused session a page instead of JSON or a bare 403 also counts as expired. Any failure drops the stored session, and sessions older than 6 hours are replaced.
+- Log the session lifecycle (new login and its reason, reuse with the session's age, expiry after N minutes) to the n8n log at info level, without credentials, cookies or content, so the real session lifetime can be measured.
+- Name the cause and host in TRANSPORT_ERROR, e.g. ETIMEDOUT on synergia.librus.pl, instead of discarding it; only system-style error codes are copied.
+- Give the message operations a fresh request budget for their retry after a session expiry, as the calendar operation already had.
+
 ## 0.2.0 — 2026-09-12
 
 - Add two calendar events, Nowe wydarzenie w terminarzu and Zmiana wydarzenia w terminarzu, to the shared Librus Trigger node; removals and cancellations are reported on the change event, not a separate one.
