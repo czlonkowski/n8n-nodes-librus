@@ -554,6 +554,35 @@ test('Get Content uses the exact ID and refreshes an expired session once', asyn
 	assert.equal(calls.filter((c) => c.url.endsWith('/api/inbox/messages/abc_123')).length, 2);
 });
 
+test('Get Content unwraps the XML envelope Librus has sent since 2026-09-30', async () => {
+	const cases = [
+		[
+			'<Message><Content><![CDATA[Dzień dobry.\nZostaje tylko godzina 14.\n]]></Content><Actions></Actions></Message>',
+			'Dzień dobry.\nZostaje tylko godzina 14.\n',
+		],
+		[
+			'<Message><Content><![CDATA[Przypominam <b>o zdjęciu</b>.]]></Content><Actions><Actions/></Actions></Message>',
+			'Przypominam <b>o zdjęciu</b>.',
+		],
+		// A body containing "]]>" is split into adjacent CDATA sections.
+		['<Message><Content><![CDATA[a]]]]><![CDATA[>b]]></Content></Message>', 'a]]>b'],
+		// Plain bodies and anything that is not exactly the envelope pass through unchanged.
+		['Zwykła treść <b>html</b>', 'Zwykła treść <b>html</b>'],
+		[
+			'<Message><Content>bez CDATA</Content></Message>',
+			'<Message><Content>bez CDATA</Content></Message>',
+		],
+		['<Message><Content><![CDATA[urwane]]>', '<Message><Content><![CDATA[urwane]]>'],
+	];
+	for (const [raw, expected] of cases) {
+		const { client } = setup([
+			...auth(),
+			ok({ data: { messageId: '7', Message: Buffer.from(raw).toString('base64') } }),
+		]);
+		assert.equal((await client.getMessageContent('7')).content, expected);
+	}
+});
+
 test('unread full-content recovery retains selected IDs even if earlier detail reads changed their status', async () => {
 	const detail = (id) =>
 		ok({ data: { messageId: id, Message: Buffer.from('Body ' + id).toString('base64') } });

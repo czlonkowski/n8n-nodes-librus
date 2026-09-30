@@ -225,11 +225,28 @@ function decodeContent(value: unknown): string {
 	) {
 		throw protocolError('treść base64', value);
 	}
+	let text: string;
 	try {
-		return new TextDecoder('utf-8', { fatal: true }).decode(Buffer.from(value, 'base64'));
+		text = new TextDecoder('utf-8', { fatal: true }).decode(Buffer.from(value, 'base64'));
 	} catch {
 		throw protocolError('treść UTF-8', value);
 	}
+	return unwrapMessageEnvelope(text);
+}
+// Since 2026-09-30 Librus sends message bodies as <Message><Content><![CDATA[…]]></Content>
+// <Actions>…</Actions></Message>. Return just the body, joining split CDATA sections. Anything
+// that does not match the envelope exactly is returned unchanged, so no content is ever lost.
+function unwrapMessageEnvelope(text: string): string {
+	const open = /^\s*<Message>\s*<Content>/.exec(text);
+	if (!open) return text;
+	let rest = text.slice(open[0].length);
+	let body = '';
+	let sections = 0;
+	for (let section; (section = /^<!\[CDATA\[([\s\S]*?)\]\]>/.exec(rest)); sections++) {
+		body += section[1];
+		rest = rest.slice(section[0].length);
+	}
+	return sections > 0 && /^\s*<\/Content>[\s\S]*<\/Message>\s*$/.test(rest) ? body : text;
 }
 // The Librus web UI reads message tags as objects with an id field.
 // Preserve our string-array output and copy only IDs, never arbitrary tag properties.

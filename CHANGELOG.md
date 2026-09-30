@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.5.1 — 2026-09-30
+
+- Unwrap the XML envelope that Librus has put around message bodies since 2026-09-30 (`<Message><Content><![CDATA[…]]></Content><Actions>…</Actions></Message>`), so Get Content and full-content message reads return the plain body again. Split CDATA sections are joined, and anything that is not exactly this envelope is returned unchanged, so no content is lost if the format changes again.
+
 ## 0.5.0 — 2026-09-24
 
 - Add a Terminarz resource with the Pobierz wydarzenia operation to the Librus node. It reads the current month plus 0–6 following months and returns the entries in the same shape as the calendar trigger, marked `changeType: "existing"`, optionally only those dated today or later in Polish time. It reuses the shared session and hydrates details for up to 50 entries per run.
